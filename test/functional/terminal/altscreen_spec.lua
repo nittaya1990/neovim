@@ -1,21 +1,34 @@
-local helpers = require('test.functional.helpers')(after_each)
-local thelpers = require('test.functional.terminal.helpers')
-local clear, eq, curbuf = helpers.clear, helpers.eq, helpers.curbuf
-local feed = helpers.feed
-local feed_data = thelpers.feed_data
-local enter_altscreen = thelpers.enter_altscreen
-local exit_altscreen = thelpers.exit_altscreen
+local t = require('test.testutil')
+local n = require('test.functional.testnvim')()
 
-if helpers.pending_win32(pending) then return end
+local tt = require('test.functional.testterm')
+local clear, eq, api = n.clear, t.eq, n.api
+local feed = n.feed
+local feed_data = tt.feed_data
+local enter_altscreen = tt.enter_altscreen
+local exit_altscreen = tt.exit_altscreen
+
+if t.skip(t.is_os('win')) then
+  return
+end
 
 describe(':terminal altscreen', function()
   local screen
 
   before_each(function()
     clear()
-    screen = thelpers.screen_setup()
-    feed_data({'line1', 'line2', 'line3', 'line4', 'line5', 'line6',
-               'line7', 'line8', ''})
+    screen = tt.setup_screen()
+    feed_data({
+      'line1',
+      'line2',
+      'line3',
+      'line4',
+      'line5',
+      'line6',
+      'line7',
+      'line8',
+      '',
+    })
     screen:expect([[
       line4                                             |
       line5                                             |
@@ -27,15 +40,11 @@ describe(':terminal altscreen', function()
     ]])
     enter_altscreen()
     screen:expect([[
-                                                        |
-                                                        |
-                                                        |
-                                                        |
-                                                        |
+                                                        |*5
       {1: }                                                 |
       {3:-- TERMINAL --}                                    |
     ]])
-    eq(10, curbuf('line_count'))
+    eq(10, api.nvim_buf_line_count(0))
   end)
 
   it('wont clear lines already in the scrollback', function()
@@ -45,9 +54,7 @@ describe(':terminal altscreen', function()
       line1                                             |
       line2                                             |
       line3                                             |
-                                                        |
-                                                        |
-                                                        |
+                                                        |*3
     ]])
   end)
 
@@ -79,8 +86,17 @@ describe(':terminal altscreen', function()
 
   describe('with lines printed after the screen height limit', function()
     before_each(function()
-      feed_data({'line9', 'line10', 'line11', 'line12', 'line13',
-                 'line14', 'line15', 'line16', ''})
+      feed_data({
+        'line9',
+        'line10',
+        'line11',
+        'line12',
+        'line13',
+        'line14',
+        'line15',
+        'line16',
+        '',
+      })
       screen:expect([[
         line12                                            |
         line13                                            |
@@ -93,7 +109,7 @@ describe(':terminal altscreen', function()
     end)
 
     it('wont modify line count', function()
-      eq(10, curbuf('line_count'))
+      eq(10, api.nvim_buf_line_count(0))
     end)
 
     it('wont modify lines in the scrollback', function()
@@ -114,8 +130,7 @@ describe(':terminal altscreen', function()
     local function wait_removal()
       screen:try_resize(screen._width, screen._height - 2)
       screen:expect([[
-                                                          |
-                                                          |
+                                                          |*2
         rows: 4, cols: 50                                 |
         {1: }                                                 |
         {3:-- TERMINAL --}                                    |
@@ -126,13 +141,12 @@ describe(':terminal altscreen', function()
       wait_removal()
       feed('<c-\\><c-n>4k')
       screen:expect([[
-        ^line3                                             |
-                                                          |
-                                                          |
+        ^                                                  |
+                                                          |*2
         rows: 4, cols: 50                                 |
                                                           |
       ]])
-      eq(8, curbuf('line_count'))
+      eq(9, api.nvim_buf_line_count(0))
     end)
 
     describe('and after exit', function()
@@ -142,15 +156,11 @@ describe(':terminal altscreen', function()
       end)
 
       it('restore buffer state', function()
-        -- FIXME(tarruda): Note that the last line was lost after restoring the
-        -- screen. This is a libvterm bug: When the main screen is restored it
-        -- seems to "cut" lines that would have been left below the new visible
-        -- screen.
         screen:expect([[
-          line4                                             |
           line5                                             |
           line6                                             |
           line7                                             |
+          line8                                             |
           {3:-- TERMINAL --}                                    |
         ]])
       end)

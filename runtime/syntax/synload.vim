@@ -1,6 +1,7 @@
 " Vim syntax support file
-" Maintainer:	Bram Moolenaar <Bram@vim.org>
-" Last Change:	2020 Apr 13
+" Maintainer:	The Vim Project <https://github.com/vim/vim>
+" Last Change:	2023 Aug 10
+" Former Maintainer:	Bram Moolenaar <Bram@vim.org>
 
 " This file sets up for syntax highlighting.
 " It is loaded from "syntax.vim" and "manual.vim".
@@ -30,7 +31,7 @@ fun! s:SynSet()
     unlet b:current_syntax
   endif
 
-  let s = expand("<amatch>")
+  0verbose let s = expand("<amatch>")
   if s == "ON"
     " :set syntax=ON
     if &filetype == ""
@@ -48,8 +49,8 @@ fun! s:SynSet()
     " load each in sequence.  Skip empty entries.
     for name in split(s, '\.')
       if !empty(name)
-        exe "runtime! syntax/" . name . ".vim syntax/" . name . "/*.vim"
-        exe "runtime! syntax/" . name . ".lua syntax/" . name . "/*.lua"
+        " XXX: "[.]" in the first pattern makes it a wildcard on Windows
+        exe $'runtime! syntax/{name}[.]{{vim,lua}} syntax/{name}/*.{{vim,lua}}'
       endif
     endfor
   endif

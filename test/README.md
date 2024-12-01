@@ -3,7 +3,7 @@ Tests
 
 Tests are broadly divided into *unit tests* ([test/unit](https://github.com/neovim/neovim/tree/master/test/unit/)),
 *functional tests* ([test/functional](https://github.com/neovim/neovim/tree/master/test/functional/)),
-and *old tests* ([src/nvim/testdir/](https://github.com/neovim/neovim/tree/master/src/nvim/testdir/)).
+and *old tests* ([test/old/testdir/](https://github.com/neovim/neovim/tree/master/test/old/testdir/)).
 
 - _Unit_ testing is achieved by compiling the tests as a shared library which is
   loaded and called by [LuaJit FFI](http://luajit.org/ext_ffi.html).
@@ -37,18 +37,21 @@ Layout
 - `/test/benchmark` : benchmarks
 - `/test/functional` : functional tests
 - `/test/unit` : unit tests
+- `/test/old/testdir` : old tests (from Vim)
 - `/test/config` : contains `*.in` files which are transformed into `*.lua`
-  files using `configure_file` CMake command: this is for acessing CMake
+  files using `configure_file` CMake command: this is for accessing CMake
   variables in lua tests.
 - `/test/includes` : include-files for use by luajit `ffi.cdef` C definitions
   parser: normally used to make macros not accessible via this mechanism
   accessible the other way.
 - `/test/*/preload.lua` : modules preloaded by busted `--helper` option
-- `/test/**/helpers.lua` : common utility functions for test code
+- `/test/**/testutil.lua` : common utility functions in the context of the test
+  runner
+- `/test/**/testnvim.lua` : common utility functions in the context of the
+  test session (RPC channel to the Nvim child process created by clear() for each test)
 - `/test/*/**/*_spec.lua` : actual tests. Files that do not end with
-  `_spec.lua` are libraries like `/test/**/helpers.lua`, except that they have
+  `_spec.lua` are libraries like `/test/**/testutil.lua`, except that they have
   some common topic.
-- `/src/nvim/testdir` : old tests (from Vim)
 
 
 Running tests
@@ -83,7 +86,7 @@ To run a *single* legacy test file you can use either:
 
 or:
 
-    make src/nvim/testdir/test_syntax.vim
+    make test/old/testdir/test_syntax.vim
 
 - Specify only the test file name, not the full path.
 
@@ -91,32 +94,56 @@ or:
 Debugging tests
 ---------------
 
-- You can set `$GDB` to [run tests under gdbserver](https://github.com/neovim/neovim/pull/1527).
-  And if `$VALGRIND` is set it will pass `--vgdb=yes` to valgrind instead of
+- Each test gets a test id which looks like "T123". This also appears in the
+  log file. Child processes spawned from a test appear in the logs with the
+  *parent* name followed by "/c". Example:
+  ```
+    DBG 2022-06-15T18:37:45.226 T57.58016.0   UI: flush
+    DBG 2022-06-15T18:37:45.226 T57.58016.0   inbuf_poll:442: blocking... events_enabled=0 events_pending=0
+    DBG 2022-06-15T18:37:45.227 T57.58016.0/c UI: stop
+    INF 2022-06-15T18:37:45.227 T57.58016.0/c os_exit:595: Nvim exit: 0
+    DBG 2022-06-15T18:37:45.229 T57.58016.0   read_cb:118: closing Stream (0x7fd5d700ea18): EOF (end of file)
+    INF 2022-06-15T18:37:45.229 T57.58016.0   on_proc_exit:400: exited: pid=58017 status=0 stoptime=0
+  ```
+- You can set `$GDB` to [run functional tests under gdbserver](https://github.com/neovim/neovim/pull/1527):
+
+  ```sh
+  GDB=1 TEST_FILE=test/functional/api/buffer_spec.lua TEST_FILTER='nvim_buf_set_text works$' make functionaltest
+  ```
+
+  Read more about [filtering tests](#filtering-tests).
+
+  Then, in another terminal:
+
+  ```sh
+  gdb -ex 'target remote localhost:7777' build/bin/nvim
+  ```
+
+  If `$VALGRIND` is also set it will pass `--vgdb=yes` to valgrind instead of
   starting gdbserver directly.
-- Hanging tests often happen due to unexpected `:h press-enter` prompts. The
+
+  See `nvim_argv` in https://github.com/neovim/neovim/blob/master/test/functional/testnvim.lua.
+
+- Hanging tests can happen due to unexpected "press-enter" prompts. The
   default screen width is 50 columns. Commands that try to print lines longer
   than 50 columns in the command-line, e.g. `:edit very...long...path`, will
-  trigger the prompt. In this case, a shorter path or `:silent edit` should be
-  used.
+  trigger the prompt. Try using a shorter path, or `:silent edit`.
 - If you can't figure out what is going on, try to visualize the screen. Put
   this at the beginning of your test:
-
-    ```lua
-    local Screen = require('test.functional.ui.screen')
-    local screen = Screen.new()
-    screen:attach()
-    ```
-
-  Afterwards, put `screen:snapshot_util()` at any position in your test. See the
-  comment at the top of `test/functional/ui/screen.lua` for more.
+  ```lua
+  local Screen = require('test.functional.ui.screen')
+  local screen = Screen.new()
+  screen:attach()
+  ```
+  Then put `screen:snapshot_util()` anywhere in your test. See the comments in
+  `test/functional/ui/screen.lua` for more info.
 
 Filtering Tests
 ---------------
 
 ### Filter by name
 
-Another filter method is by setting a pattern of test name to `TEST_FILTER`.
+Tests can be filtered by setting a pattern of test name to `TEST_FILTER` or `TEST_FILTER_OUT`.
 
 ``` lua
 it('foo api',function()
@@ -131,19 +158,35 @@ To run only test with filter name:
 
     TEST_FILTER='foo.*api' make functionaltest
 
+To run all tests except ones matching a filter:
+
+    TEST_FILTER_OUT='foo.*api' make functionaltest
+
 ### Filter by file
 
 To run a *specific* unit test:
 
     TEST_FILE=test/unit/foo.lua make unittest
 
+or
+
+    cmake -E env "TEST_FILE=test/unit/foo.lua" cmake --build build --target unittest
+
 To run a *specific* functional test:
 
     TEST_FILE=test/functional/foo.lua make functionaltest
 
+or
+
+    cmake -E env "TEST_FILE=test/functional/foo.lua" cmake --build build --target functionaltest
+
 To *repeat* a test:
 
     BUSTED_ARGS="--repeat=100 --no-keep-going" TEST_FILE=test/functional/foo_spec.lua make functionaltest
+
+or
+
+    cmake -E env "TEST_FILE=test/functional/foo_spec.lua" cmake -E env BUSTED_ARGS="--repeat=100 --no-keep-going" cmake --build build --target functionaltest
 
 ### Filter by tag
 
@@ -178,7 +221,7 @@ Guidelines
 
 - Luajit needs to know about type and constant declarations used in function
   prototypes. The
-  [helpers.lua](https://github.com/neovim/neovim/blob/master/test/unit/helpers.lua)
+  [testutil.lua](https://github.com/neovim/neovim/blob/master/test/unit/testutil.lua)
   file automatically parses `types.h`, so types used in the tested functions
   could be moved to it to avoid having to rewrite the declarations in the test
   files.
@@ -193,7 +236,7 @@ Guidelines
   (success + fail + error + pending) is the same in all environments.
     - *Note:* `pending()` is ignored if it is missing an argument, unless it is
       [contained in an `it()` block](https://github.com/neovim/neovim/blob/d21690a66e7eb5ebef18046c7a79ef898966d786/test/functional/ex_cmds/grep_spec.lua#L11).
-      Provide empty function argument if the `pending()` call is outside of `it()`
+      Provide empty function argument if the `pending()` call is outside `it()`
       ([example](https://github.com/neovim/neovim/commit/5c1dc0fbe7388528875aff9d7b5055ad718014de#diff-bf80b24c724b0004e8418102f68b0679R18)).
 - Really long `source([=[...]=])` blocks may break Vim's Lua syntax
   highlighting. Try `:syntax sync fromstart` to fix it.
@@ -212,7 +255,7 @@ by the semantic component they are testing.
 - _Functional tests_
   ([test/functional](https://github.com/neovim/neovim/tree/master/test/functional))
   are higher-level (plugins and user input) than unit tests; they are organized
-  by concept. 
+  by concept.
     - Try to find an existing `test/functional/*/*_spec.lua` group that makes
       sense, before creating a new one.
 
@@ -220,7 +263,7 @@ by the semantic component they are testing.
 Lint
 ====
 
-`make lint` (and `make lualint`) runs [luacheck](https://github.com/mpeterv/luacheck)
+`make lint` (and `make lintlua`) runs [luacheck](https://github.com/mpeterv/luacheck)
 on the test code.
 
 If a luacheck warning must be ignored, specify the warning code. Example:
@@ -236,12 +279,15 @@ the file).
 Configuration
 =============
 
-Test behaviour is affected by environment variables. Currently supported 
-(Functional, Unit, Benchmarks) (when Defined; when set to _1_; when defined, 
-treated as Integer; when defined, treated as String; when defined, treated as 
+Test behaviour is affected by environment variables. Currently supported
+(Functional, Unit, Benchmarks) (when Defined; when set to _1_; when defined,
+treated as Integer; when defined, treated as String; when defined, treated as
 Number; !must be defined to function properly):
 
 - `BUSTED_ARGS` (F) (U): arguments forwarded to `busted`.
+
+- `CC` (U) (S): specifies which C compiler to use to preprocess files.
+  Currently only compilers with gcc-compatible arguments are supported.
 
 - `GDB` (F) (D): makes nvim instances to be run under `gdbserver`. It will be
   accessible on `localhost:7777`: use `gdb build/bin/nvim`, type `target remote
@@ -249,14 +295,16 @@ Number; !must be defined to function properly):
 
 - `GDBSERVER_PORT` (F) (I): overrides port used for `GDB`.
 
+- `LOG_DIR` (FU) (S!): specifies where to seek for valgrind and ASAN log files.
+
 - `VALGRIND` (F) (D): makes nvim instances to be run under `valgrind`. Log
   files are named `valgrind-%p.log` in this case. Note that non-empty valgrind
   log may fail tests. Valgrind arguments may be seen in
-  `/test/functional/helpers.lua`. May be used in conjunction with `GDB`.
+  `/test/functional/testnvim.lua`. May be used in conjunction with `GDB`.
 
 - `VALGRIND_LOG` (F) (S): overrides valgrind log file name used for `VALGRIND`.
 
-- `TEST_COLORS` (F) (U) (D): enable pretty colors in test runner.
+- `TEST_COLORS` (F) (U) (D): enable pretty colors in test runner. Set to true by default.
 
 - `TEST_SKIP_FRAGILE` (F) (D): makes test suite skip some fragile tests.
 
@@ -265,11 +313,7 @@ Number; !must be defined to function properly):
 
 - `NVIM_LUA_NOTRACK` (F) (D): disable reference counting of Lua objects
 
-- `NVIM_PROG`, `NVIM_PRG` (F) (S): override path to Neovim executable (default
-  to `build/bin/nvim`).
-
-- `CC` (U) (S): specifies which C compiler to use to preprocess files.
-  Currently only compilers with gcc-compatible arguments are supported.
+- `NVIM_PRG` (F) (S): path to Nvim executable (default: `build/bin/nvim`).
 
 - `NVIM_TEST_MAIN_CDEFS` (U) (1): makes `ffi.cdef` run in main process. This
   raises a possibility of bugs due to conflicts in header definitions, despite
@@ -290,8 +334,6 @@ Number; !must be defined to function properly):
 
 - `NVIM_TEST_RUN_FAILING_TESTS` (U) (1): makes `itp` run tests which are known
   to fail (marked by setting third argument to `true`).
-
-- `LOG_DIR` (FU) (S!): specifies where to seek for valgrind and ASAN log files.
 
 - `NVIM_TEST_CORE_*` (FU) (S): a set of environment variables which specify
   where to search for core files. Are supposed to be defined all at once.

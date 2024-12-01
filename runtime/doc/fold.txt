@@ -69,8 +69,6 @@ method.  The value of the 'foldexpr' option is evaluated to get the foldlevel
 of a line.  Examples:
 This will create a fold for all consecutive lines that start with a tab: >
 	:set foldexpr=getline(v:lnum)[0]==\"\\t\"
-This will call a function to compute the fold level: >
-	:set foldexpr=MyFoldLevel(v:lnum)
 This will make a fold out of paragraphs separated by blank lines: >
 	:set foldexpr=getline(v:lnum)=~'^\\s*$'&&getline(v:lnum+1)=~'\\S'?'<1':1
 This does the same: >
@@ -78,6 +76,10 @@ This does the same: >
 
 Note that backslashes must be used to escape characters that ":set" handles
 differently (space, backslash, double quote, etc., see |option-backslash|).
+
+The most efficient is to call a function without arguments: >
+	:set foldexpr=MyFoldLevel()
+The function must use v:lnum.  See |expr-option-function|.
 
 These are the conditions with which the expression is evaluated:
 - The current buffer and window are set for the line.
@@ -116,6 +118,11 @@ method can be very slow!
 Try to avoid the "=", "a" and "s" return values, since Vim often has to search
 backwards for a line for which the fold level is defined.  This can be slow.
 
+If the 'foldexpr' expression starts with s: or |<SID>|, then it is replaced
+with the script ID (|local-function|). Examples: >
+		set foldexpr=s:MyFoldExpr()
+		set foldexpr=<SID>SomeFoldExpr()
+<
 An example of using "a1" and "s1": For a multi-line C comment, a line
 containing "/*" would return "a1" to start a fold, and a line containing "*/"
 would return "s1" to end the fold after that line: >
@@ -190,7 +197,7 @@ non-matching marker pairs.  Example: >
 
 	/* funcB() {{{2 */
 	void funcB() {}
-
+<							*{{{* *}}}*
 A fold starts at a "{{{" marker.  The following number specifies the fold
 level.  What happens depends on the difference between the current fold level
 and the level given by the marker:
@@ -248,7 +255,7 @@ This does not work properly when:
   know what to do.
 - Folds nearby use a level number in their marker which gets in the way.
 - The line is inside a comment, 'commentstring' isn't empty and nested
-  comments don't work.  For example with C: adding /* {{{ */ inside a comment
+  comments don't work.  For example with C: adding `/* {{{ */` inside a comment
   will truncate the existing comment.  Either put the marker before or after
   the comment, or add the marker manually.
 Generally it's not a good idea to let Vim create markers when you already have
@@ -341,7 +348,8 @@ zC		Close all folds under the cursor recursively.  Folds that
 		'foldenable' will be set.
 
 							*za*
-za		When on a closed fold: open it.  When folds are nested, you
+za		Summary: Toggle the fold under the cursor.
+		When on a closed fold: open it.  When folds are nested, you
 		may have to use "za" several times.  When a count is given,
 		that many closed folds are opened.
 		When on an open fold: close it and set 'foldenable'.  This
@@ -491,17 +499,19 @@ is evaluated to obtain the text displayed for a closed fold.  Example: >
 
 This shows the first line of the fold, with "/*", "*/" and "{{{" removed.
 Note the use of backslashes to avoid some characters to be interpreted by the
-":set" command.  It's simpler to define a function and call that: >
+":set" command.  It is much simpler to define a function and call it: >
 
     :set foldtext=MyFoldText()
     :function MyFoldText()
     :  let line = getline(v:foldstart)
     :  let sub = substitute(line, '/\*\|\*/\|{{{\d\=', '', 'g')
-    :  return v:folddashes . sub
+    :  return v:folddashes .. sub
     :endfunction
 
 Evaluating 'foldtext' is done in the |sandbox|.  The current window is set to
-the window that displays the line.  Errors are ignored.
+the window that displays the line.
+
+Errors are ignored.  For debugging set the 'debug' option to "throw".
 
 The default value is |foldtext()|.  This returns a reasonable text for most
 types of folding.  If you don't like it, you can specify your own 'foldtext'
@@ -512,13 +522,20 @@ expression.  It can use these special Vim variables:
 			foldlevel.
 	v:foldlevel	the foldlevel of the fold
 
-In the result a TAB is replaced with a space and unprintable characters are
-made into printable characters.
+If the result is a |List|, it is parsed and drawn like "overlay" virtual text
+(see |nvim_buf_set_extmark()|), otherwise the result is converted to a string
+where a TAB is replaced with a space and unprintable characters are made into
+printable characters.
 
 The resulting line is truncated to fit in the window, it never wraps.
 When there is room after the text, it is filled with the character specified
 by 'fillchars'.
 
+If the 'foldtext' expression starts with s: or |<SID>|, then it is replaced
+with the script ID (|local-function|). Examples: >
+		set foldtext=s:MyFoldText()
+		set foldtext=<SID>SomeFoldText()
+<
 Note that backslashes need to be used for characters that the ":set" command
 handles differently: Space, backslash and double-quote. |option-backslash|
 
@@ -573,6 +590,11 @@ line is folded, it cannot be displayed there.
 
 Many movement commands handle a sequence of folded lines like an empty line.
 For example, the "w" command stops once in the first column.
+
+When starting a search in a closed fold it will not find a match in the
+current fold.  It's like a forward search always starts from the end of the
+closed fold, while a backwards search starts from the start of the closed
+fold.
 
 When in Insert mode, the cursor line is never folded.  That allows you to see
 what you type!

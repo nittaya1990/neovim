@@ -1,17 +1,17 @@
 -- Tests for 'fixeol'
 
-local helpers = require('test.functional.helpers')(after_each)
-local feed = helpers.feed
-local clear, feed_command, expect = helpers.clear, helpers.feed_command, helpers.expect
+local n = require('test.functional.testnvim')()
+
+local feed = n.feed
+local clear, feed_command, expect = n.clear, n.feed_command, n.expect
 
 describe('fixeol', function()
   local function rmtestfiles()
-    feed_command('%bwipeout!')
-    feed_command('call delete("test.out")')
-    feed_command('call delete("XXEol")')
-    feed_command('call delete("XXNoEol")')
-    feed_command('call delete("XXTestEol")')
-    feed_command('call delete("XXTestNoEol")')
+    os.remove('test.out')
+    os.remove('XXEol')
+    os.remove('XXNoEol')
+    os.remove('XXTestEol')
+    os.remove('XXTestNoEol')
   end
   setup(function()
     clear()

@@ -1,6 +1,3 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
 /*
  * This module exports three classes, and each instance of those classes has its
  * own private registry for temporary reference storage(keeping state between
@@ -27,14 +24,16 @@
 #include <lua.h>
 #include <luaconf.h>
 
-#include "nvim/macros.h"
+#include "nvim/macros_defs.h"
 
 #include "lmpack.h"
 
 #include "rpc.h"
 
 #define UNPACKER_META_NAME "mpack.Unpacker"
+#define UNPACK_FN_NAME "decode"
 #define PACKER_META_NAME "mpack.Packer"
+#define PACK_FN_NAME "encode"
 #define SESSION_META_NAME "mpack.Session"
 #define NIL_NAME "mpack.NIL"
 #define EMPTY_DICT_NAME "mpack.empty_dict"
@@ -231,7 +230,7 @@ static mpack_uint32_t lmpack_objlen(lua_State *L, int *is_array)
   while (lua_next(L, -2)) {
     lua_pop(L, 1);  /* pop value */
     isarr = isarr
-      && lua_isnumber(L, -1)            /* lua number */
+      && lua_type(L, -1) == LUA_TNUMBER /* lua number */
       && (n = lua_tonumber(L, -1)) > 0  /* greater than 0 */
       && (size_t)n == n;                /* and integer */
     max = isarr && (size_t)n > max ? (size_t)n : max;
@@ -432,8 +431,8 @@ static int lmpack_unpacker_unpack_str(lua_State *L, Unpacker *unpacker,
 
   if (unpacker->unpacking) {
     return luaL_error(L, "Unpacker instance already working. Use another "
-                         "Unpacker or the module's \"unpack\" function if you "
-                         "need to unpack from the ext handler");
+                         "Unpacker or mpack." UNPACK_FN_NAME "() if you "
+                         "need to " UNPACK_FN_NAME " from the ext handler");
   }
   
   do {
@@ -593,6 +592,7 @@ static void lmpack_unparse_enter(mpack_parser_t *parser, mpack_node_t *node)
       /* push the pair */
       result = lua_next(L, -2);
       assert(result);  /* should not be here if the map was fully processed */
+      (void)result; /* ignore unused warning */
       if (parent->key_visited) {
         /* release the current key */
         lmpack_unref(L, packer->reg, (int)parent->data[1].i);
@@ -641,7 +641,13 @@ static void lmpack_unparse_enter(mpack_parser_t *parser, mpack_node_t *node)
       mpack_node_t *n;
 
       int has_meta = lua_getmetatable(L, -1);
-      if (packer->ext != LUA_NOREF && has_meta) {
+      int has_mtdict = false;
+      if (has_meta && packer->mtdict != LUA_NOREF) {
+          lmpack_geti(L, packer->reg, packer->mtdict); // [table, metatable, mtdict]
+          has_mtdict = lua_rawequal(L, -1, -2);
+          lua_pop(L, 1); // [table, metatable];
+      }
+      if (packer->ext != LUA_NOREF && has_meta && !has_mtdict) {
         /* check if there's a handler for this metatable */
         lmpack_geti(L, packer->reg, packer->ext);
         lua_pushvalue(L, -2);
@@ -698,14 +704,7 @@ static void lmpack_unparse_enter(mpack_parser_t *parser, mpack_node_t *node)
         }
       }
 
-      int is_array = 1;
       if (has_meta) {
-        // stack: [table, metatable]
-        if (packer->mtdict != LUA_NOREF) {
-          lmpack_geti(L, packer->reg, packer->mtdict); // [table, metatable, mtdict]
-          is_array = !lua_rawequal(L, -1, -2);
-          lua_pop(L, 1); // [table, metatable];
-        }
         lua_pop(L, 1); // [table]
       }
 
@@ -723,6 +722,7 @@ static void lmpack_unparse_enter(mpack_parser_t *parser, mpack_node_t *node)
         lua_pop(L, 1);
       }
 
+      int is_array = !has_mtdict;
       len = lmpack_objlen(L, &is_array);
       if (is_array) {
         node->tok = mpack_pack_array(len);
@@ -784,8 +784,8 @@ static int lmpack_packer_pack(lua_State *L)
 
   if (packer->packing) {
     return luaL_error(L, "Packer instance already working. Use another Packer "
-                         "or the module's \"pack\" function if you need to "
-                         "pack from the ext handler");
+                         "or mpack." PACK_FN_NAME "() if you need to "
+                         PACK_FN_NAME " from the ext handler");
   }
 
   do {
@@ -882,7 +882,9 @@ static int lmpack_session_receive(lua_State *L)
   luaL_argcheck(L, (size_t)startpos <= len, 3,
       "start position must be less than or equal to the input string length");
 
-  str += (size_t)startpos - 1;
+  size_t offset = (size_t)startpos - 1 ;
+  str += offset;
+  len -= offset;
 
   if (session->unpacker != LUA_REFNIL) {
     lmpack_geti(L, session->reg, session->unpacker);
@@ -1008,6 +1010,7 @@ static int lmpack_session_reply(lua_State *L)
       "invalid request id");
   result = mpack_rpc_reply(session->session, &b, &bl, (mpack_uint32_t)id);
   assert(result == MPACK_OK);
+  (void)result; /* ignore unused warning */
   lua_pushlstring(L, buf, sizeof(buf) - bl);
   return 1;
 }
@@ -1025,6 +1028,7 @@ static int lmpack_session_notify(lua_State *L)
   session = lmpack_check_session(L, 1);
   result = mpack_rpc_notify(session->session, &b, &bl);
   assert(result == MPACK_OK);
+  (void)result; /* ignore unused warning */
   lua_pushlstring(L, buf, sizeof(buf) - bl);
   return 1;
 }
@@ -1161,8 +1165,8 @@ static const luaL_reg mpack_functions[] = {
   {"Unpacker", lmpack_unpacker_new},
   {"Packer", lmpack_packer_new},
   {"Session", lmpack_session_new},
-  {"unpack", lmpack_unpack},
-  {"pack", lmpack_pack},
+  {UNPACK_FN_NAME, lmpack_unpack},
+  {PACK_FN_NAME, lmpack_pack},
   {NULL, NULL}
 };
 

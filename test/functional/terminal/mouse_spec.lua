@@ -1,22 +1,28 @@
-local helpers = require('test.functional.helpers')(after_each)
-local thelpers = require('test.functional.terminal.helpers')
-local clear, eq, eval = helpers.clear, helpers.eq, helpers.eval
-local feed, nvim = helpers.feed, helpers.nvim
-local feed_data = thelpers.feed_data
+local t = require('test.testutil')
+local n = require('test.functional.testnvim')()
+
+local tt = require('test.functional.testterm')
+local clear, eq, eval = n.clear, t.eq, n.eval
+local feed, api, command = n.feed, n.api, n.command
+local feed_data = tt.feed_data
+local is_os = t.is_os
+local skip = t.skip
 
 describe(':terminal mouse', function()
   local screen
 
   before_each(function()
     clear()
-    nvim('set_option', 'statusline', '==========')
-    nvim('command', 'highlight StatusLine cterm=NONE')
-    nvim('command', 'highlight StatusLineNC cterm=NONE')
-    nvim('command', 'highlight VertSplit cterm=NONE')
-    screen = thelpers.screen_setup()
+    api.nvim_set_option_value('statusline', '==========', {})
+    screen = tt.setup_screen()
+    command('highlight StatusLine NONE')
+    command('highlight StatusLineNC NONE')
+    command('highlight StatusLineTerm NONE')
+    command('highlight StatusLineTermNC NONE')
+    command('highlight VertSplit NONE')
     local lines = {}
     for i = 1, 30 do
-      table.insert(lines, 'line'..tostring(i))
+      table.insert(lines, 'line' .. tostring(i))
     end
     table.insert(lines, '')
     feed_data(lines)
@@ -38,6 +44,32 @@ describe(':terminal mouse', function()
       eq('nt', eval('mode(1)'))
     end)
 
+    it('will exit focus and trigger Normal mode mapping on mouse click', function()
+      feed([[<C-\><C-N>qri]])
+      command('let g:got_leftmouse = 0')
+      command('nnoremap <LeftMouse> <Cmd>let g:got_leftmouse = 1<CR>')
+      eq('t', eval('mode(1)'))
+      eq(0, eval('g:got_leftmouse'))
+      feed('<LeftMouse>')
+      eq('nt', eval('mode(1)'))
+      eq(1, eval('g:got_leftmouse'))
+      feed('q')
+      eq('i<LeftMouse>', eval('keytrans(@r)'))
+    end)
+
+    it('will exit focus and trigger Normal mode mapping on mouse click with modifier', function()
+      feed([[<C-\><C-N>qri]])
+      command('let g:got_ctrl_leftmouse = 0')
+      command('nnoremap <C-LeftMouse> <Cmd>let g:got_ctrl_leftmouse = 1<CR>')
+      eq('t', eval('mode(1)'))
+      eq(0, eval('g:got_ctrl_leftmouse'))
+      feed('<C-LeftMouse>')
+      eq('nt', eval('mode(1)'))
+      eq(1, eval('g:got_ctrl_leftmouse'))
+      feed('q')
+      eq('i<C-LeftMouse>', eval('keytrans(@r)'))
+    end)
+
     it('will exit focus on <C-\\> + mouse-scroll', function()
       eq('t', eval('mode(1)'))
       feed('<C-\\>')
@@ -45,10 +77,30 @@ describe(':terminal mouse', function()
       eq('nt', eval('mode(1)'))
     end)
 
+    it('will not exit focus on left-release', function()
+      eq('t', eval('mode(1)'))
+      feed('<LeftRelease><0,0>')
+      eq('t', eval('mode(1)'))
+      command('setlocal number')
+      eq('t', eval('mode(1)'))
+      feed('<LeftRelease><0,0>')
+      eq('t', eval('mode(1)'))
+    end)
+
+    it('will not exit focus on mouse movement', function()
+      eq('t', eval('mode(1)'))
+      feed('<MouseMove><0,0>')
+      eq('t', eval('mode(1)'))
+      command('setlocal number')
+      eq('t', eval('mode(1)'))
+      feed('<MouseMove><0,0>')
+      eq('t', eval('mode(1)'))
+    end)
+
     describe('with mouse events enabled by the program', function()
       before_each(function()
-        thelpers.enable_mouse()
-        thelpers.feed_data('mouse enabled\n')
+        tt.enable_mouse()
+        tt.feed_data('mouse enabled\n')
         screen:expect([[
           line27                                            |
           line28                                            |
@@ -60,8 +112,8 @@ describe(':terminal mouse', function()
         ]])
       end)
 
-      it('will forward mouse clicks to the program', function()
-        if helpers.pending_win32(pending) then return end
+      it('will forward mouse press, drag and release to the program', function()
+        skip(is_os('win'))
         feed('<LeftMouse><1,2>')
         screen:expect([[
           line27                                            |
@@ -72,10 +124,40 @@ describe(':terminal mouse', function()
            "#{1: }                                              |
           {3:-- TERMINAL --}                                    |
         ]])
+        feed('<LeftDrag><2,2>')
+        screen:expect([[
+          line27                                            |
+          line28                                            |
+          line29                                            |
+          line30                                            |
+          mouse enabled                                     |
+             @##{1: }                                           |
+          {3:-- TERMINAL --}                                    |
+        ]])
+        feed('<LeftDrag><3,2>')
+        screen:expect([[
+          line27                                            |
+          line28                                            |
+          line29                                            |
+          line30                                            |
+          mouse enabled                                     |
+                @$#{1: }                                        |
+          {3:-- TERMINAL --}                                    |
+        ]])
+        feed('<LeftRelease><3,2>')
+        screen:expect([[
+          line27                                            |
+          line28                                            |
+          line29                                            |
+          line30                                            |
+          mouse enabled                                     |
+                   #$#{1: }                                     |
+          {3:-- TERMINAL --}                                    |
+        ]])
       end)
 
       it('will forward mouse scroll to the program', function()
-        if helpers.pending_win32(pending) then return end
+        skip(is_os('win'))
         feed('<ScrollWheelUp><0,0>')
         screen:expect([[
           line27                                            |
@@ -88,9 +170,63 @@ describe(':terminal mouse', function()
         ]])
       end)
 
+      it('dragging and scrolling do not interfere with each other', function()
+        skip(is_os('win'))
+        feed('<LeftMouse><1,2>')
+        screen:expect([[
+          line27                                            |
+          line28                                            |
+          line29                                            |
+          line30                                            |
+          mouse enabled                                     |
+           "#{1: }                                              |
+          {3:-- TERMINAL --}                                    |
+        ]])
+        feed('<ScrollWheelUp><1,2>')
+        screen:expect([[
+          line27                                            |
+          line28                                            |
+          line29                                            |
+          line30                                            |
+          mouse enabled                                     |
+             `"#{1: }                                           |
+          {3:-- TERMINAL --}                                    |
+        ]])
+        feed('<LeftDrag><2,2>')
+        screen:expect([[
+          line27                                            |
+          line28                                            |
+          line29                                            |
+          line30                                            |
+          mouse enabled                                     |
+                @##{1: }                                        |
+          {3:-- TERMINAL --}                                    |
+        ]])
+        feed('<ScrollWheelUp><2,2>')
+        screen:expect([[
+          line27                                            |
+          line28                                            |
+          line29                                            |
+          line30                                            |
+          mouse enabled                                     |
+                   `##{1: }                                     |
+          {3:-- TERMINAL --}                                    |
+        ]])
+        feed('<LeftRelease><2,2>')
+        screen:expect([[
+          line27                                            |
+          line28                                            |
+          line29                                            |
+          line30                                            |
+          mouse enabled                                     |
+                      ###{1: }                                  |
+          {3:-- TERMINAL --}                                    |
+        ]])
+      end)
+
       it('will forward mouse clicks to the program with the correct even if set nu', function()
-        if helpers.pending_win32(pending) then return end
-        nvim('command', 'set number')
+        skip(is_os('win'))
+        command('set number')
         -- When the display area such as a number is clicked, it returns to the
         -- normal mode.
         feed('<LeftMouse><3,0>')
@@ -117,10 +253,137 @@ describe(':terminal mouse', function()
           {3:-- TERMINAL --}                                    |
         ]])
       end)
+
+      it('will lose focus if statusline is clicked', function()
+        command('set laststatus=2')
+        screen:expect([[
+          line29                                            |
+          line30                                            |
+          mouse enabled                                     |
+          rows: 5, cols: 50                                 |
+          {1: }                                                 |
+          ==========                                        |
+          {3:-- TERMINAL --}                                    |
+        ]])
+        feed('<LeftMouse><0,5>')
+        screen:expect([[
+          line29                                            |
+          line30                                            |
+          mouse enabled                                     |
+          rows: 5, cols: 50                                 |
+          {2:^ }                                                 |
+          ==========                                        |
+                                                            |
+        ]])
+        feed('<LeftDrag><0,4>')
+        screen:expect([[
+          mouse enabled                                     |
+          rows: 5, cols: 50                                 |
+          rows: 4, cols: 50                                 |
+          {2:^ }                                                 |
+          ==========                                        |
+                                                            |*2
+        ]])
+      end)
+
+      it('will lose focus if right separator is clicked', function()
+        command('rightbelow vnew | wincmd p | startinsert')
+        screen:expect([[
+          line29                  │                         |
+          line30                  │{4:~                        }|
+          mouse enabled           │{4:~                        }|
+          rows: 5, cols: 24       │{4:~                        }|
+          {1: }                       │{4:~                        }|
+          ==========               ==========               |
+          {3:-- TERMINAL --}                                    |
+        ]])
+        feed('<LeftMouse><24,0>')
+        screen:expect([[
+          line29                  │                         |
+          line30                  │{4:~                        }|
+          mouse enabled           │{4:~                        }|
+          rows: 5, cols: 24       │{4:~                        }|
+          {2:^ }                       │{4:~                        }|
+          ==========               ==========               |
+                                                            |
+        ]])
+        feed('<LeftDrag><23,0>')
+        screen:expect([[
+          line30                 │                          |
+          mouse enabled          │{4:~                         }|
+          rows: 5, cols: 24      │{4:~                         }|
+          rows: 5, cols: 23      │{4:~                         }|
+          {2:^ }                      │{4:~                         }|
+          ==========              ==========                |
+                                                            |
+        ]])
+      end)
+
+      it('will lose focus if winbar/tabline is clicked', function()
+        command('setlocal winbar=WINBAR')
+        screen:expect([[
+          {3:WINBAR                                            }|
+          line29                                            |
+          line30                                            |
+          mouse enabled                                     |
+          rows: 5, cols: 50                                 |
+          {1: }                                                 |
+          {3:-- TERMINAL --}                                    |
+        ]])
+        feed('<LeftMouse><0,0>')
+        screen:expect([[
+          {3:WINBAR                                            }|
+          line29                                            |
+          line30                                            |
+          mouse enabled                                     |
+          rows: 5, cols: 50                                 |
+          {2:^ }                                                 |
+                                                            |
+        ]])
+        command('set showtabline=2 tabline=TABLINE | startinsert')
+        screen:expect([[
+          {1:TABLINE                                           }|
+          {3:WINBAR                                            }|
+          mouse enabled                                     |
+          rows: 5, cols: 50                                 |
+          rows: 4, cols: 50                                 |
+          {1: }                                                 |
+          {3:-- TERMINAL --}                                    |
+        ]])
+        feed('<LeftMouse><0,0>')
+        screen:expect([[
+          {1:TABLINE                                           }|
+          {3:WINBAR                                            }|
+          mouse enabled                                     |
+          rows: 5, cols: 50                                 |
+          rows: 4, cols: 50                                 |
+          {2:^ }                                                 |
+                                                            |
+        ]])
+        command('setlocal winbar= | startinsert')
+        screen:expect([[
+          {1:TABLINE                                           }|
+          mouse enabled                                     |
+          rows: 5, cols: 50                                 |
+          rows: 4, cols: 50                                 |
+          rows: 5, cols: 50                                 |
+          {1: }                                                 |
+          {3:-- TERMINAL --}                                    |
+        ]])
+        feed('<LeftMouse><0,0>')
+        screen:expect([[
+          {1:TABLINE                                           }|
+          mouse enabled                                     |
+          rows: 5, cols: 50                                 |
+          rows: 4, cols: 50                                 |
+          rows: 5, cols: 50                                 |
+          {2:^ }                                                 |
+                                                            |
+        ]])
+      end)
     end)
 
     describe('with a split window and other buffer', function()
-      if helpers.pending_win32(pending) then return end
       before_each(function()
         feed('<c-\\><c-n>:vsp<cr>')
         screen:expect([[
@@ -164,8 +427,8 @@ describe(':terminal mouse', function()
         ]])
 
         -- enabling mouse won't affect interaction with other windows
-        thelpers.enable_mouse()
-        thelpers.feed_data('mouse enabled\n')
+        tt.enable_mouse()
+        tt.feed_data('mouse enabled\n')
         screen:expect([[
           {7: 27 }line                 │line30                  |
           {7: 28 }line                 │rows: 5, cols: 25       |
@@ -177,7 +440,7 @@ describe(':terminal mouse', function()
         ]])
       end)
 
-      it('wont lose focus if another window is scrolled', function()
+      it("scrolling another window keeps focus and respects 'mousescroll'", function()
         feed('<ScrollWheelUp><4,0><ScrollWheelUp><4,0>')
         screen:expect([[
           {7: 21 }line                 │line30                  |
@@ -198,6 +461,53 @@ describe(':terminal mouse', function()
           ==========                ==========              |
           {3:-- TERMINAL --}                                    |
         ]])
+        command('set mousescroll=ver:10')
+        feed('<ScrollWheelUp><0,0>')
+        screen:expect([[
+          {7: 16 }line                 │line30                  |
+          {7: 17 }line                 │rows: 5, cols: 25       |
+          {7: 18 }line                 │rows: 5, cols: 24       |
+          {7: 19 }line                 │mouse enabled           |
+          {7: 20 }line                 │{1: }                       |
+          ==========                ==========              |
+          {3:-- TERMINAL --}                                    |
+        ]])
+        command('set mousescroll=ver:0')
+        feed('<ScrollWheelUp><0,0>')
+        screen:expect_unchanged()
+        feed([[<C-\><C-N><C-W>w]])
+        command('setlocal nowrap')
+        feed('0<C-V>gg3ly$4p<C-W>wi')
+        screen:expect([[
+          {7:  1 }linelinelinelineline │line30                  |
+          {7:  2 }linelinelinelineline │rows: 5, cols: 25       |
+          {7:  3 }linelinelinelineline │rows: 5, cols: 24       |
+          {7:  4 }linelinelinelineline │mouse enabled           |
+          {7:  5 }linelinelinelineline │{1: }                       |
+          ==========                ==========              |
+          {3:-- TERMINAL --}                                    |
+        ]])
+        feed('<ScrollWheelRight><4,0>')
+        screen:expect([[
+          {7:  1 }nelinelineline       │line30                  |
+          {7:  2 }nelinelineline       │rows: 5, cols: 25       |
+          {7:  3 }nelinelineline       │rows: 5, cols: 24       |
+          {7:  4 }nelinelineline       │mouse enabled           |
+          {7:  5 }nelinelineline       │{1: }                       |
+          ==========                ==========              |
+          {3:-- TERMINAL --}                                    |
+        ]])
+        command('set mousescroll=hor:4')
+        feed('<ScrollWheelLeft><4,0>')
+        screen:expect([[
+          {7:  1 }nelinelinelineline   │line30                  |
+          {7:  2 }nelinelinelineline   │rows: 5, cols: 25       |
+          {7:  3 }nelinelinelineline   │rows: 5, cols: 24       |
+          {7:  4 }nelinelinelineline   │mouse enabled           |
+          {7:  5 }nelinelinelineline   │{1: }                       |
+          ==========                ==========              |
+          {3:-- TERMINAL --}                                    |
+        ]])
       end)
 
       it('will lose focus if another window is clicked', function()
@@ -214,7 +524,7 @@ describe(':terminal mouse', function()
       end)
 
       it('handles terminal size when switching buffers', function()
-        nvim('set_option', 'hidden', true)
+        api.nvim_set_option_value('hidden', true, {})
         feed('<c-\\><c-n><c-w><c-w>')
         screen:expect([[
           {7: 27 }line                 │line30                  |

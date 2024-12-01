@@ -1,12 +1,12 @@
--- Modules loaded here will not be cleared and reloaded by Busted.
+-- Modules loaded here will NOT be cleared and reloaded by Busted.
 -- Busted started doing this to help provide more isolation.  See issue #62
 -- for more information about this.
-local helpers = require('test.functional.helpers')(nil)
-local iswin = helpers.iswin
+local t = require('test.testutil')
+require('test.functional.ui.screen')
 
-if iswin() then
+if t.is_os('win') then
   local ffi = require('ffi')
-  ffi.cdef[[
+  ffi.cdef [[
   typedef int errno_t;
   errno_t _set_fmode(int mode);
   ]]

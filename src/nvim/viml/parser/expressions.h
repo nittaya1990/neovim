@@ -1,13 +1,12 @@
-#ifndef NVIM_VIML_PARSER_EXPRESSIONS_H
-#define NVIM_VIML_PARSER_EXPRESSIONS_H
+#pragma once
 
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
-#include "nvim/eval/typval.h"
-#include "nvim/types.h"
-#include "nvim/viml/parser/parser.h"
+#include "nvim/eval/typval_defs.h"
+#include "nvim/types_defs.h"
+#include "nvim/viml/parser/parser_defs.h"
 
 // Defines whether to ignore case:
 //    ==   kCCStrategyUseOption
@@ -57,7 +56,7 @@ typedef enum {
 } LexExprTokenType;
 
 typedef enum {
-  kExprCmpEqual,  ///< Equality, unequality.
+  kExprCmpEqual,  ///< Equality, inequality.
   kExprCmpMatches,  ///< Matches regex, not matches regex.
   kExprCmpGreater,  ///< `>` or `<=`
   kExprCmpGreaterOrEqual,  ///< `>=` or `<`.
@@ -217,7 +216,7 @@ typedef enum {
   /// kExprNodeCurlyBracesIdentifier.
   kExprNodeUnknownFigure,
   kExprNodeLambda,  ///< Lambda.
-  kExprNodeDictLiteral,  ///< Dictionary literal.
+  kExprNodeDictLiteral,  ///< Dict literal.
   kExprNodeCurlyBracesIdentifier,  ///< Part of the curly braces name.
   kExprNodeComma,  ///< Comma “operator”.
   kExprNodeColon,  ///< Colon “operator”.
@@ -357,11 +356,11 @@ typedef struct {
   int arg_len;
 } ExprASTError;
 
-/// Structure representing complety AST for one expression
+/// Structure representing complete AST for one expression
 typedef struct {
   /// When AST is not correct this message will be printed.
   ///
-  /// Uses `emsgf(msg, arg_len, arg);`, `msg` is assumed to contain only `%.*s`.
+  /// Uses `semsg(msg, arg_len, arg);`, `msg` is assumed to contain only `%.*s`.
   ExprASTError err;
   /// Root node of the AST.
   ExprASTNode *root;
@@ -385,5 +384,3 @@ extern const char *const expr_asgn_type_tab[];
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "viml/parser/expressions.h.generated.h"
 #endif
-
-#endif  // NVIM_VIML_PARSER_EXPRESSIONS_H

@@ -1,103 +1,86 @@
-#ifndef NVIM_DECORATION_H
-#define NVIM_DECORATION_H
+#pragma once
 
-#include "nvim/buffer_defs.h"
-#include "nvim/extmark_defs.h"
-#include "nvim/pos.h"
+#include <stdbool.h>
+#include <stddef.h>  // IWYU pragma: keep
+#include <stdint.h>
 
-// actual Decoration data is in extmark_defs.h
+#include "klib/kvec.h"
+#include "nvim/decoration_defs.h"  // IWYU pragma: keep
+#include "nvim/macros_defs.h"
+#include "nvim/marktree_defs.h"
+#include "nvim/pos_defs.h"  // IWYU pragma: keep
+#include "nvim/sign_defs.h"  // IWYU pragma: keep
+#include "nvim/types_defs.h"
 
-typedef uint16_t DecorPriority;
-#define DECOR_PRIORITY_BASE 0x1000
+// actual Decor* data is in decoration_defs.h
+
+/// Keep in sync with VirtTextPos in decoration_defs.h
+EXTERN const char *const virt_text_pos_str[]
+INIT( = { "eol", "overlay", "win_col", "right_align", "inline" });
+
+/// Keep in sync with HlMode in decoration_defs.h
+EXTERN const char *const hl_mode_str[] INIT( = { "", "replace", "combine", "blend" });
 
 typedef enum {
-  kVTEndOfLine,
-  kVTOverlay,
-  kVTWinCol,
-  kVTRightAlign,
-} VirtTextPos;
-
-typedef enum {
-  kHlModeUnknown,
-  kHlModeReplace,
-  kHlModeCombine,
-  kHlModeBlend,
-} HlMode;
-
-typedef kvec_t(VirtTextChunk) VirtText;
-#define VIRTTEXT_EMPTY ((VirtText)KV_INITIAL_VALUE)
-
-
-typedef kvec_t(struct virt_line { VirtText line; bool left_col; }) VirtLines;
-
-
-struct Decoration
-{
-  VirtText virt_text;
-  VirtLines virt_lines;
-
-  int hl_id;  // highlight group
-  VirtTextPos virt_text_pos;
-  HlMode hl_mode;
-
-  // TODO(bfredl): at some point turn this into FLAGS
-  bool virt_text_hide;
-  bool hl_eol;
-  bool shared;  // shared decoration, don't free
-  bool virt_lines_above;
-  // TODO(bfredl): style, signs, etc
-  DecorPriority priority;
-  int col;  // fixed col value, like win_col
-  int virt_text_width;  // width of virt_text
-};
-#define DECORATION_INIT { KV_INITIAL_VALUE, KV_INITIAL_VALUE, 0, kVTEndOfLine, kHlModeUnknown, \
-                          false, false, false, false, DECOR_PRIORITY_BASE, 0, 0 }
+  kDecorKindHighlight,
+  kDecorKindSign,
+  kDecorKindVirtText,
+  kDecorKindVirtLines,
+  kDecorKindUIWatched,
+} DecorRangeKind;
 
 typedef struct {
   int start_row;
   int start_col;
   int end_row;
   int end_col;
-  Decoration decor;
-  int attr_id;  // cached lookup of decor.hl_id
-  bool virt_text_owned;
-  int win_col;
+  // next pointers MUST NOT be used, these are separate ranges
+  // vt->next could be pointing to freelist memory at this point
+  union {
+    DecorSignHighlight sh;
+    DecorVirtText *vt;
+    struct {
+      uint32_t ns_id;
+      uint32_t mark_id;
+      VirtTextPos pos;
+    } ui;
+  } data;
+  int attr_id;  ///< cached lookup of inl.hl_id if it was a highlight
+  bool owned;   ///< ephemeral decoration, free memory immediately
+  DecorPriority priority;
+  DecorRangeKind kind;
+  /// Screen column to draw the virtual text.
+  /// When -1, it should be drawn on the current screen line after deciding where.
+  /// When -3, it may be drawn at a position yet to be assigned.
+  /// When -10, it has just been added.
+  /// When INT_MIN, it should no longer be drawn.
+  int draw_col;
 } DecorRange;
 
 typedef struct {
   MarkTreeIter itr[1];
   kvec_t(DecorRange) active;
-  buf_T *buf;
+  win_T *win;
   int top_row;
   int row;
   int col_until;
   int current;
   int eol_col;
+
+  int conceal;
+  schar_T conceal_char;
+  int conceal_attr;
+
+  TriState spell;
+
+  bool running_decor_provider;
 } DecorState;
 
-typedef struct {
-  NS ns_id;
-  bool active;
-  LuaRef redraw_start;
-  LuaRef redraw_buf;
-  LuaRef redraw_win;
-  LuaRef redraw_line;
-  LuaRef redraw_end;
-  LuaRef hl_def;
-  int hl_valid;
-} DecorProvider;
-
-EXTERN kvec_t(DecorProvider) decor_providers INIT(= KV_INITIAL_VALUE);
-EXTERN DecorState decor_state INIT(= { 0 });
-EXTERN bool provider_active INIT(= false);
-
-#define DECORATION_PROVIDER_INIT(ns_id) (DecorProvider) \
-  { ns_id, false, LUA_NOREF, LUA_NOREF, \
-    LUA_NOREF, LUA_NOREF, LUA_NOREF, \
-    LUA_NOREF, -1 }
+EXTERN DecorState decor_state INIT( = { 0 });
+// TODO(bfredl): These should maybe be per-buffer, so that all resources
+// associated with a buffer can be freed when the buffer is unloaded.
+EXTERN kvec_t(DecorSignHighlight) decor_items INIT( = KV_INITIAL_VALUE);
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "decoration.h.generated.h"
 #endif
-
-#endif  // NVIM_DECORATION_H

@@ -1,93 +1,115 @@
-#ifndef NVIM_MBYTE_H
-#define NVIM_MBYTE_H
+#pragma once
 
 #include <stdbool.h>
 #include <stdint.h>
-#include <string.h>
+#include <sys/types.h>  // IWYU pragma: keep
+#include <utf8proc.h>
+#include <uv.h>  // IWYU pragma: keep
 
-#include "nvim/func_attr.h"
-#include "nvim/iconv.h"
-#include "nvim/os/os_defs.h"  // For indirect
-#include "nvim/types.h"  // for char_u
+#include "nvim/cmdexpand_defs.h"  // IWYU pragma: keep
+#include "nvim/eval/typval_defs.h"  // IWYU pragma: keep
+#include "nvim/macros_defs.h"
+#include "nvim/mbyte_defs.h"  // IWYU pragma: keep
+#include "nvim/types_defs.h"  // IWYU pragma: keep
 
-/*
- * Return byte length of character that starts with byte "b".
- * Returns 1 for a single-byte character.
- * MB_BYTE2LEN_CHECK() can be used to count a special key as one byte.
- * Don't call MB_BYTE2LEN(b) with b < 0 or b > 255!
- */
+typedef utf8proc_int32_t GraphemeState;
+#define GRAPHEME_STATE_INIT 0
+
+#ifdef INCLUDE_GENERATED_DECLARATIONS
+# include "mbyte.h.generated.h"
+# include "mbyte.h.inline.generated.h"
+#endif
+
+enum {
+  kInvalidByteCells = 4,
+};
+
+// Return byte length of character that starts with byte "b".
+// Returns 1 for a single-byte character.
+// MB_BYTE2LEN_CHECK() can be used to count a special key as one byte.
+// Don't call MB_BYTE2LEN(b) with b < 0 or b > 255!
 #define MB_BYTE2LEN(b)         utf8len_tab[b]
 #define MB_BYTE2LEN_CHECK(b)   (((b) < 0 || (b) > 255) ? 1 : utf8len_tab[b])
-
-// max length of an unicode char
-#define MB_MAXCHAR     6
-
-// properties used in enc_canon_table[] (first three mutually exclusive)
-#define ENC_8BIT       0x01
-#define ENC_DBCS       0x02
-#define ENC_UNICODE    0x04
-
-#define ENC_ENDIAN_B   0x10        // Unicode: Big endian
-#define ENC_ENDIAN_L   0x20        // Unicode: Little endian
-
-#define ENC_2BYTE      0x40        // Unicode: UCS-2
-#define ENC_4BYTE      0x80        // Unicode: UCS-4
-#define ENC_2WORD      0x100       // Unicode: UTF-16
-
-#define ENC_LATIN1     0x200       // Latin1
-#define ENC_LATIN9     0x400       // Latin9
-#define ENC_MACROMAN   0x800       // Mac Roman (not Macro Man! :-)
-
-// TODO(bfredl): eventually we should keep only one of the namings
-#define mb_ptr2len utfc_ptr2len
-#define mb_char2len utf_char2len
-#define mb_char2cells utf_char2cells
-
-/// Flags for vimconv_T
-typedef enum {
-  CONV_NONE      = 0,
-  CONV_TO_UTF8   = 1,
-  CONV_9_TO_UTF8 = 2,
-  CONV_TO_LATIN1 = 3,
-  CONV_TO_LATIN9 = 4,
-  CONV_ICONV     = 5,
-} ConvFlags;
-
-#define MBYTE_NONE_CONV { \
-  .vc_type = CONV_NONE, \
-  .vc_factor = 1, \
-  .vc_fail = false, \
-}
-
-/// Structure used for string conversions
-typedef struct {
-  int vc_type;  ///< Zero or more ConvFlags.
-  int vc_factor;  ///< Maximal expansion factor.
-#ifdef HAVE_ICONV
-  iconv_t vc_fd;  ///< Value for CONV_ICONV.
-#endif
-  bool vc_fail;  ///< What to do with invalid characters: if true, fail,
-                 ///< otherwise use '?'.
-} vimconv_T;
 
 extern const uint8_t utf8len_tab_zero[256];
 
 extern const uint8_t utf8len_tab[256];
 
-#ifdef INCLUDE_GENERATED_DECLARATIONS
-# include "mbyte.h.generated.h"
-#endif
+// Use our own character-case definitions, because the current locale may
+// differ from what the .spl file uses.
+// These must not be called with negative number!
+// Multi-byte implementation.  For Unicode we can call utf_*(), but don't do
+// that for ASCII, because we don't want to use 'casemap' here.  Otherwise use
+// the "w" library function for characters above 255.
+#define SPELL_TOFOLD(c) ((c) >= 128 ? utf_fold(c) : (int)spelltab.st_fold[c])
 
-static inline int mb_strcmp_ic(bool ic, const char *s1, const char *s2)
-  REAL_FATTR_NONNULL_ALL REAL_FATTR_PURE REAL_FATTR_WARN_UNUSED_RESULT;
+#define SPELL_TOUPPER(c) ((c) >= 128 ? mb_toupper(c) : (int)spelltab.st_upper[c])
 
-/// Compare strings
-///
-/// @param[in]  ic  True if case is to be ignored.
-///
-/// @return 0 if s1 == s2, <0 if s1 < s2, >0 if s1 > s2.
-static inline int mb_strcmp_ic(bool ic, const char *s1, const char *s2)
+#define SPELL_ISUPPER(c) ((c) >= 128 ? mb_isupper(c) : spelltab.st_isu[c])
+
+// MB_PTR_ADV(): advance a pointer to the next character, taking care of
+// multi-byte characters if needed. Skip over composing chars.
+#define MB_PTR_ADV(p)      (p += utfc_ptr2len((char *)p))
+
+// MB_PTR_BACK(): backup a pointer to the previous character, taking care of
+// multi-byte characters if needed. Only use with "p" > "s" !
+#define MB_PTR_BACK(s, p) \
+  (p -= utf_head_off((char *)(s), (char *)(p) - 1) + 1)
+
+/// Check whether a given UTF-8 byte is a trailing byte (10xx.xxxx).
+
+static inline bool utf_is_trail_byte(uint8_t const byte)
+  FUNC_ATTR_CONST FUNC_ATTR_ALWAYS_INLINE
 {
-  return (ic ? mb_stricmp(s1, s2) : strcmp(s1, s2));
+  // uint8_t is for clang to use smaller cmp
+  return (uint8_t)(byte & 0xC0U) == 0x80U;
 }
-#endif  // NVIM_MBYTE_H
+
+/// Convert a UTF-8 byte sequence to a Unicode code point.
+/// Handles ascii, multibyte sequiences and illegal sequences.
+///
+/// @param[in]  p_in  String to convert.
+///
+/// @return information abouth the character. When the sequence is illegal,
+/// "value" is negative, "len" is 1.
+static inline CharInfo utf_ptr2CharInfo(char const *const p_in)
+  FUNC_ATTR_NONNULL_ALL FUNC_ATTR_PURE FUNC_ATTR_WARN_UNUSED_RESULT FUNC_ATTR_ALWAYS_INLINE
+{
+  uint8_t const *const p = (uint8_t const *)p_in;
+  uint8_t const first = *p;
+  if (first < 0x80) {
+    return (CharInfo){ .value = first, .len = 1 };
+  } else {
+    int len = utf8len_tab[first];
+    int32_t const code_point = utf_ptr2CharInfo_impl(p, (uintptr_t)len);
+    if (code_point < 0) {
+      len = 1;
+    }
+    return (CharInfo){ .value = code_point, .len = len };
+  }
+}
+
+/// Return information about the next character.
+/// Composing and combining characters are considered a part of the current character.
+///
+/// @param[in] cur  Information about the current character in the string.
+static inline StrCharInfo utfc_next(StrCharInfo cur)
+  FUNC_ATTR_NONNULL_ALL FUNC_ATTR_ALWAYS_INLINE FUNC_ATTR_PURE
+{
+  // handle ASCII case inline
+  uint8_t *next = (uint8_t *)(cur.ptr + cur.chr.len);
+  if (EXPECT(*next < 0x80U, true)) {
+    return (StrCharInfo){
+      .ptr = (char *)next,
+      .chr = (CharInfo){ .value = *next, .len = 1 },
+    };
+  }
+
+  return utfc_next_impl(cur);
+}
+
+static inline StrCharInfo utf_ptr2StrCharInfo(char *ptr)
+  FUNC_ATTR_NONNULL_ALL FUNC_ATTR_ALWAYS_INLINE FUNC_ATTR_PURE
+{
+  return (StrCharInfo){ .ptr = ptr, .chr = utf_ptr2CharInfo(ptr) };
+}

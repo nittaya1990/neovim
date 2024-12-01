@@ -103,7 +103,7 @@ gn			Search forward for the last used search pattern, like
 			E.g., "dgn" deletes the text of the next match.
 			If Visual mode is active, extends the selection
 			until the end of the next match.
-			'wrapscan' applies
+			'wrapscan' applies.
 			Note: Unlike `n` the search direction does not depend
 			on the previous search command.
 
@@ -161,13 +161,15 @@ If you want to highlight exactly the same area as the last time, you can use
 							*v_<Esc>*
 <Esc>			In Visual mode: Stop Visual mode.
 						*v_META* *v_ALT*
-		ALT (|META|) acts like <Esc> if the chord is not mapped.
+		ALT (|META|) may act like <Esc> if the chord is not mapped.
 		For example <A-x> acts like <Esc>x if <A-x> does not have a
 		visual-mode mapping.
+
 							*v_CTRL-C*
 CTRL-C			In Visual mode: Stop Visual mode.  When insert mode is
 			pending (the mode message shows
 			"-- (insert) VISUAL --"), it is also stopped.
+			On MS-Windows, you may need to press CTRL-Break.
 
 ==============================================================================
 3. Changing the Visual area				*visual-change*
@@ -255,6 +257,7 @@ Additionally the following commands can be used:
 	X	delete (2)					|v_X|
 	Y	yank (2)					|v_Y|
 	p	put						|v_p|
+	P	put without overwriting registers		|v_P|
 	J	join (1)					|v_J|
 	U	make uppercase					|v_U|
 	u	make lowercase					|v_u|
@@ -360,8 +363,23 @@ same amount of text as the last time:
   last line the same number of characters as in the last line the last time.
 The start of the text is the Cursor position.  If the "$" command was used as
 one of the last commands to extend the highlighted text, the repeating will
-be applied up to the rightmost column of the longest line.
+be applied up to the rightmost column of the longest line.  Any count passed
+to the `.` command is not used.
 
+Visual mode |default-mappings| "@" and "Q" repeat a register for all selected
+lines if the selection is linewise.  See |v_@-default| and |v_Q-default| for
+details.  For example, given the text:
+
+	123(hello)321
+	456(world)654
+	456(NOT THIS)654
+
+With register "x" containing the commands `yi(VP`, visually selecting the
+first two lines and typing `@x` produces:
+
+	hello
+	world
+	456(NOT THIS)654
 
 ==============================================================================
 7. Examples						*visual-examples*
@@ -395,7 +413,7 @@ selected text: >
 (In the <> notation |<>|, when typing it you should type it literally; you
 need to remove the 'B' flag from 'cpoptions')
 
-Note that special characters (like '.' and '*') will cause problems.
+Note that special characters (like '.' and "*") will cause problems.
 
 Visual-block Examples					*blockwise-examples*
 With the following text, I will indicate the commands to produce the block and
@@ -477,6 +495,10 @@ Commands in Select mode:
 - ESC stops Select mode.
 - CTRL-O switches to Visual mode for the duration of one command. *v_CTRL-O*
 - CTRL-G switches to Visual mode.
+- CTRL-R {register} selects the register to be used for the text that is
+  deleted when typing text.					  *v_CTRL-R*
+  Unless you specify the "_" (black hole) register, the unnamed register is
+  also overwritten.
 
 Otherwise, typed characters are handled as in Visual mode.
 
@@ -493,6 +515,13 @@ work both in Visual mode and in Select mode.  When these are used in Select
 mode Vim automatically switches to Visual mode, so that the same behavior as
 in Visual mode is effective.  If you don't want this use |:xmap| or |:smap|.
 
+One particular edge case: >
+	:vnoremap <C-K> <Esc>
+This ends Visual mode when in Visual mode, but in Select mode it does not
+work, because Select mode is restored after executing the mapped keys.  You
+need to use: >
+	:snoremap <C-K> <Esc>
+<
 Users will expect printable characters to replace the selected area.
 Therefore avoid mapping printable characters in Select mode.  Or use
 |:sunmap|  after |:map| and |:vmap| to remove it for Select mode.

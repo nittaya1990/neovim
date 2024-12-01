@@ -1,25 +1,26 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
-#include <stdarg.h>
+#include <stdbool.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <uv.h>
 
 #include "nvim/event/loop.h"
-#include "nvim/event/process.h"
+#include "nvim/event/multiqueue.h"
 #include "nvim/log.h"
+#include "nvim/memory.h"
+#include "nvim/os/time.h"
+#include "nvim/types_defs.h"
 
 #ifdef INCLUDE_GENERATED_DECLARATIONS
 # include "event/loop.c.generated.h"
 #endif
 
-
 void loop_init(Loop *loop, void *data)
 {
   uv_loop_init(&loop->uv);
   loop->recursive = 0;
+  loop->closing = false;
   loop->uv.data = loop;
-  loop->children = kl_init(WatcherPtr);
+  kv_init(loop->children);
   loop->events = multiqueue_new_parent(loop_on_put, loop);
   loop->fast_events = multiqueue_new_child(loop->events);
   loop->thread_events = multiqueue_new_parent(NULL, NULL);
@@ -28,30 +29,29 @@ void loop_init(Loop *loop, void *data)
   uv_signal_init(&loop->uv, &loop->children_watcher);
   uv_timer_init(&loop->uv, &loop->children_kill_timer);
   uv_timer_init(&loop->uv, &loop->poll_timer);
+  uv_timer_init(&loop->uv, &loop->exit_delay_timer);
   loop->poll_timer.data = xmalloc(sizeof(bool));  // "timeout expired" flag
 }
 
-/// Processes one `Loop.uv` event (at most).
-/// Processes all `Loop.fast_events` events.
-/// Does NOT process `Loop.events`, that is an application-specific decision.
+/// Process `Loop.uv` events with a timeout.
 ///
 /// @param loop
-/// @param ms   0: non-blocking poll.
-///            >0: timeout after `ms`.
-///            <0: wait forever.
-/// @returns true if `ms` timeout was reached
-bool loop_poll_events(Loop *loop, int ms)
+/// @param ms  0: non-blocking poll.
+///            > 0: timeout after `ms`.
+///            < 0: wait forever.
+/// @return  true if `ms` > 0 and was reached
+static bool loop_uv_run(Loop *loop, int64_t ms)
 {
   if (loop->recursive++) {
     abort();  // Should not re-enter uv_run
   }
 
   uv_run_mode mode = UV_RUN_ONCE;
-  bool timeout_expired = false;
+  bool *timeout_expired = loop->poll_timer.data;
+  *timeout_expired = false;
 
   if (ms > 0) {
-    *((bool *)loop->poll_timer.data) = false;  // reset "timeout expired" flag
-    // Dummy timer to ensure UV_RUN_ONCE does not block indefinitely for I/O.
+    // This timer ensures UV_RUN_ONCE does not block indefinitely for I/O.
     uv_timer_start(&loop->poll_timer, timer_cb, (uint64_t)ms, (uint64_t)ms);
   } else if (ms == 0) {
     // For ms == 0, do a non-blocking event poll.
@@ -61,11 +61,25 @@ bool loop_poll_events(Loop *loop, int ms)
   uv_run(&loop->uv, mode);
 
   if (ms > 0) {
-    timeout_expired = *((bool *)loop->poll_timer.data);
     uv_timer_stop(&loop->poll_timer);
   }
 
   loop->recursive--;  // Can re-enter uv_run now
+  return *timeout_expired;
+}
+
+/// Processes one `Loop.uv` event (at most).
+/// Processes all `Loop.fast_events` events.
+/// Does NOT process `Loop.events`, that is an application-specific decision.
+///
+/// @param loop
+/// @param ms  0: non-blocking poll.
+///            > 0: timeout after `ms`.
+///            < 0: wait forever.
+/// @return  true if `ms` > 0 and was reached
+bool loop_poll_events(Loop *loop, int64_t ms)
+{
+  bool timeout_expired = loop_uv_run(loop, ms);
   multiqueue_process_events(loop->fast_events);
   return timeout_expired;
 }
@@ -75,7 +89,7 @@ bool loop_poll_events(Loop *loop, int ms)
 /// @note Event is queued into `fast_events`, which is processed outside of the
 ///       primary `events` queue by loop_poll_events(). For `main_loop`, that
 ///       means `fast_events` is NOT processed in an "editor mode"
-///       (VimState.execute), so redraw and other side-effects are likely to be
+///       (VimState.execute), so redraw and other side effects are likely to be
 ///       skipped.
 /// @see loop_schedule_deferred
 void loop_schedule_fast(Loop *loop, Event event)
@@ -94,7 +108,7 @@ void loop_schedule_deferred(Loop *loop, Event event)
 {
   Event *eventp = xmalloc(sizeof(*eventp));
   *eventp = event;
-  loop_schedule_fast(loop, event_create(loop_deferred_event, 2, loop, eventp));
+  loop_schedule_fast(loop, event_create(loop_deferred_event, loop, eventp));
 }
 static void loop_deferred_event(void **argv)
 {
@@ -133,10 +147,12 @@ static void loop_walk_cb(uv_handle_t *handle, void *arg)
 bool loop_close(Loop *loop, bool wait)
 {
   bool rv = true;
+  loop->closing = true;
   uv_mutex_destroy(&loop->mutex);
   uv_close((uv_handle_t *)&loop->children_watcher, NULL);
   uv_close((uv_handle_t *)&loop->children_kill_timer, NULL);
   uv_close((uv_handle_t *)&loop->poll_timer, timer_close_cb);
+  uv_close((uv_handle_t *)&loop->exit_delay_timer, NULL);
   uv_close((uv_handle_t *)&loop->async, NULL);
   uint64_t start = wait ? os_hrtime() : 0;
   bool didstop = false;
@@ -171,7 +187,7 @@ bool loop_close(Loop *loop, bool wait)
   multiqueue_free(loop->fast_events);
   multiqueue_free(loop->thread_events);
   multiqueue_free(loop->events);
-  kl_destroy(WatcherPtr, loop->children);
+  kv_destroy(loop->children);
   return rv;
 }
 

@@ -1,10 +1,11 @@
-local helpers = require('test.functional.helpers')(after_each)
+local t = require('test.testutil')
+local n = require('test.functional.testnvim')()
 
-local eq, neq, call = helpers.eq, helpers.neq, helpers.call
-local eval, feed, clear = helpers.eval, helpers.feed, helpers.clear
-local command, insert, expect = helpers.command, helpers.insert, helpers.expect
-local feed_command = helpers.feed_command
-local curwin = helpers.curwin
+local eq, neq, call = t.eq, t.neq, n.call
+local eval, feed, clear = n.eval, n.feed, n.clear
+local command, insert, expect = n.command, n.insert, n.expect
+local feed_command = n.feed_command
+local curwin = n.api.nvim_get_current_win
 
 describe("'langmap'", function()
   before_each(function()
@@ -14,13 +15,13 @@ describe("'langmap'", function()
     feed('gg0')
   end)
 
-  it("converts keys in normal mode", function()
+  it('converts keys in normal mode', function()
     feed('ix')
     expect('iii ww')
     feed('whello<esc>')
     expect('iii helloww')
   end)
-  it("gives characters that are mapped by :nmap.", function()
+  it('gives characters that are mapped by :nmap.', function()
     command('map i 0x')
     feed('w')
     expect('ii www')
@@ -30,22 +31,20 @@ describe("'langmap'", function()
       command('nmapclear')
     end)
     it("'langnoremap' is by default ON", function()
-      eq(eval('&langnoremap'), 1)
+      eq(1, eval('&langnoremap'))
     end)
-    it("Results of maps are not converted when 'langnoremap' ON.",
-    function()
+    it("Results of maps are not converted when 'langnoremap' ON.", function()
       command('nmap x i')
       feed('xdl<esc>')
       expect('dliii www')
     end)
-    it("applies when deciding whether to map recursively", function()
+    it('applies when deciding whether to map recursively', function()
       command('nmap l i')
       command('nmap w j')
       feed('ll')
       expect('liii www')
     end)
-    it("does not stop applying 'langmap' on first character of a mapping",
-    function()
+    it("does not stop applying 'langmap' on first character of a mapping", function()
       command('1t1')
       command('1t1')
       command('goto 1')
@@ -56,8 +55,7 @@ describe("'langmap'", function()
       iii www
       ihelloii www]])
     end)
-    it("Results of maps are converted when 'langnoremap' OFF.",
-    function()
+    it("Results of maps are converted when 'langnoremap' OFF.", function()
       command('set nolangnoremap')
       command('nmap x i')
       feed('xdl<esc>')
@@ -65,25 +63,24 @@ describe("'langmap'", function()
     end)
   end)
   -- e.g. CTRL-W_j  ,  mj , 'j and "jp
-  it('conversions are applied to keys in middle of command',
-  function()
+  it('conversions are applied to keys in middle of command', function()
     -- Works in middle of window command
     feed('<C-w>s')
     local origwin = curwin()
     feed('<C-w>i')
-    neq(curwin(), origwin)
+    neq(origwin, curwin())
     -- Works when setting a mark
     feed('yy3p3gg0mwgg0mi')
-    eq(call('getpos', "'i"), {0, 3, 1, 0})
-    eq(call('getpos', "'w"), {0, 1, 1, 0})
+    eq({ 0, 3, 1, 0 }, call('getpos', "'i"))
+    eq({ 0, 1, 1, 0 }, call('getpos', "'w"))
     feed('3dd')
     -- Works when moving to a mark
     feed("'i")
-    eq(call('getpos', '.'), {0, 1, 1, 0})
+    eq({ 0, 1, 1, 0 }, call('getpos', '.'))
     -- Works when selecting a register
     feed('qillqqwhhq')
-    eq(eval('@i'), 'hh')
-    eq(eval('@w'), 'll')
+    eq('hh', eval('@i'))
+    eq('ll', eval('@w'))
     feed('a<C-r>i<esc>')
     expect('illii www')
     feed('"ip')
@@ -107,7 +104,7 @@ describe("'langmap'", function()
       expect('wwi www')
       feed('u@a')
       expect('wwi www')
-      eq(eval('@a'), ':s/i/w/gc\ryyn')
+      eq(':s/i/w/gc\ryyn', eval('@a'))
     end)
     it('insert-mode CTRL-G', function()
       command('set langmap=jk,kj')
@@ -127,7 +124,7 @@ describe("'langmap'", function()
       helhellolo
       helxlo
       hello]])
-      eq(eval('@a'), 'gg3|ahellojx')
+      eq('gg3|ahellojx', eval('@a'))
     end)
     it('command-line CTRL-\\', function()
       command('set langmap=en,ne')
@@ -137,7 +134,7 @@ describe("'langmap'", function()
       hello]])
     end)
     it('command-line CTRL-R', function()
-      helpers.source([[
+      n.source([[
         let i_value = 0
         let j_value = 0
         call setreg('i', 'i_value')
@@ -145,8 +142,8 @@ describe("'langmap'", function()
         set langmap=ij,ji
       ]])
       feed(':let <C-R>i=1<CR>')
-      eq(eval('i_value'), 1)
-      eq(eval('j_value'), 0)
+      eq(1, eval('i_value'))
+      eq(0, eval('j_value'))
     end)
     -- it('-- More -- prompt', function()
     --   -- The 'b' 'j' 'd' 'f' commands at the -- More -- prompt
@@ -175,7 +172,7 @@ describe("'langmap'", function()
     end)
     it('prompt for number', function()
       command('set langmap=12,21')
-      helpers.source([[
+      n.source([[
         let gotten_one = 0
         function Map()
           let answer = inputlist(['a', '1.', '2.', '3.'])
@@ -186,17 +183,16 @@ describe("'langmap'", function()
         nnoremap x :call Map()<CR>
       ]])
       feed('x1<CR>')
-      eq(eval('gotten_one'), 1)
+      eq(1, eval('gotten_one'))
       command('let g:gotten_one = 0')
       feed_command('call Map()')
       feed('1<CR>')
-      eq(eval('gotten_one'), 1)
+      eq(1, eval('gotten_one'))
     end)
   end)
-  it('conversions are not applied during setreg()',
-  function()
+  it('conversions are not applied during setreg()', function()
     call('setreg', 'i', 'ww')
-    eq(eval('@i'), 'ww')
+    eq('ww', eval('@i'))
   end)
   it('conversions not applied in insert mode', function()
     feed('aiiiwww')
@@ -213,13 +209,16 @@ describe("'langmap'", function()
     iii]])
   end)
 
-  local function testrecording(command_string, expect_string, setup_function)
-    if setup_function then setup_function() end
+  local function testrecording(command_string, expect_string, setup_function, expect_macro)
+    if setup_function then
+      setup_function()
+    end
     feed('qa' .. command_string .. 'q')
     expect(expect_string)
-    eq(helpers.funcs.nvim_replace_termcodes(command_string, true, true, true),
-      eval('@a'))
-    if setup_function then setup_function() end
+    eq(expect_macro or n.fn.nvim_replace_termcodes(command_string, true, true, true), eval('@a'))
+    if setup_function then
+      setup_function()
+    end
     -- n.b. may need nvim_replace_termcodes() here.
     feed('@a')
     expect(expect_string)
@@ -273,8 +272,7 @@ describe("'langmap'", function()
   it('treats control modified keys as characters', function()
     command('nnoremap <C-w> iw<esc>')
     command('nnoremap <C-i> ii<esc>')
-    testrecording('<C-w>', 'whello', local_setup)
-    testrecording('<C-i>', 'ihello', local_setup)
+    testrecording('<C-w>', 'whello', local_setup, eval([["\<*C-w>"]]))
+    testrecording('<C-i>', 'ihello', local_setup, eval([["\<*C-i>"]]))
   end)
-
 end)

@@ -56,6 +56,7 @@ function s:msgpack_init_python() abort
               \. "  time = datetime.datetime.fromtimestamp(timestamp)\n"
               \. "  return time.strftime(fmt)\n"
               \. "def shada_dict_strptime():\n"
+              \. "  import calendar\n"
               \. "  import datetime\n"
               \. "  import vim\n"
               \. "  fmt = vim.eval('a:format')\n"
@@ -64,7 +65,10 @@ function s:msgpack_init_python() abort
               \. "  try:\n"
               \. "    timestamp = int(timestamp.timestamp())\n"
               \. "  except:\n"
-              \. "    timestamp = int(timestamp.strftime('%s'))\n"
+              \. "    try:\n"
+              \. "      timestamp = int(timestamp.strftime('%s'))\n"
+              \. "    except:\n"
+              \. "      timestamp = calendar.timegm(timestamp.utctimetuple())\n"
               \. "  if timestamp > 2 ** 31:\n"
               \. "    tsabs = abs(timestamp)\n"
               \. "    return ('{\"_TYPE\": v:msgpack_types.integer,'\n"
@@ -97,8 +101,8 @@ function s:msgpack_init_python() abort
   " @return Formatted timestamp.
   "
   " @warning Without +python or +python3 this function does not work correctly. 
-  "          The VimL code contains “reference” implementation which does not 
-  "          really work because of precision loss.
+  "          The Vimscript code contains “reference” implementation which does
+  "          not really work because of precision loss.
   function s:msgpack_dict_strftime(format, timestamp)
     return msgpack#strftime(a:format, +msgpack#int_dict_to_str(a:timestamp))
   endfunction
@@ -357,7 +361,7 @@ endfunction
 let s:MSGPACK_STANDARD_TYPES = {
   \type(0): 'integer',
   \type(0.0): 'float',
-  \type(''): 'binary',
+  \type(''): 'string',
   \type([]): 'array',
   \type({}): 'map',
   \type(v:true): 'boolean',
@@ -408,9 +412,15 @@ endfunction
 ""
 " Dump |msgpack-special-dict| that represents a string. If any additional 
 " parameter is given then it dumps binary string.
-function s:msgpack_dump_string(v, ...) abort
-  let ret = [a:0 ? '"' : '="']
-  for v in a:v._VAL
+function s:msgpack_dump_string(v) abort
+  if type(a:v) == type({})
+    let val = a:v
+  else
+    let val = {'_VAL': split(a:v, "\n", 1)}
+  end
+
+  let ret = ['"']
+  for v in val._VAL
     call add(
           \ret,
           \substitute(
@@ -420,16 +430,6 @@ function s:msgpack_dump_string(v, ...) abort
   endfor
   let ret[-1] = '"'
   return join(ret, '')
-endfunction
-
-""
-" Dump binary string.
-function s:msgpack_dump_binary(v) abort
-  if type(a:v) == type({})
-    return s:msgpack_dump_string(a:v, 1)
-  else
-    return s:msgpack_dump_string({'_VAL': split(a:v, "\n", 1)}, 1)
-  endif
 endfunction
 
 ""
@@ -445,7 +445,7 @@ function s:msgpack_dump_map(v) abort
   let ret = ['{']
   if msgpack#special_type(a:v) is 0
     for [k, v] in items(a:v)
-      let ret += [s:msgpack_dump_string({'_VAL': split(k, "\n", 1)}),
+      let ret += [s:msgpack_dump_string({'_VAL': split(k, "\n")}),
                  \': ',
                  \msgpack#string(v),
                  \', ']
@@ -475,7 +475,7 @@ endfunction
 " Dump extension value.
 function s:msgpack_dump_ext(v) abort
   return printf('+(%i)%s', a:v._VAL[0],
-               \s:msgpack_dump_string({'_VAL': a:v._VAL[1]}, 1))
+               \s:msgpack_dump_string({'_VAL': a:v._VAL[1]}))
 endfunction
 
 ""
@@ -537,8 +537,8 @@ let s:MSGPACK_SPECIAL_OBJECTS = {
 \}
 
 ""
-" Convert msgpack object dumped by msgpack#string() to a VimL object suitable 
-" for msgpackdump().
+" Convert msgpack object dumped by msgpack#string() to a Vimscript object
+" suitable for msgpackdump().
 "
 " @param[in]  s             String to evaluate.
 " @param[in]  special_objs  Additional special objects, in the same format as 
@@ -615,9 +615,7 @@ function msgpack#eval(s, special_objs) abort
         throw '"-invalid:Invalid string: ' . s
       endif
       call add(expr, '{''_TYPE'': v:msgpack_types.')
-      if empty(match[1])
-        call add(expr, 'binary')
-      elseif match[1] is# '='
+      if empty(match[1]) || match[1] is# '='
         call add(expr, 'string')
       else
         call add(expr, 'ext')
@@ -768,7 +766,7 @@ function msgpack#equal(a, b)
       let a = aspecial is 0 ? a:a : a:a._VAL
       let b = bspecial is 0 ? a:b : a:b._VAL
       return msgpack#equal(a, b)
-    elseif atype is# 'binary'
+    elseif atype is# 'string'
       let a = (aspecial is 0 ? split(a:a, "\n", 1) : a:a._VAL)
       let b = (bspecial is 0 ? split(a:b, "\n", 1) : a:b._VAL)
       return a ==# b
@@ -783,13 +781,17 @@ function msgpack#equal(a, b)
             " Non-special mapping cannot have non-string keys
             return 0
           endif
-          if (empty(k._VAL)
-             \|| k._VAL ==# [""]
-             \|| !empty(filter(copy(k._VAL), 'stridx(v:val, "\n") != -1')))
-            " Non-special mapping cannot have zero byte in key or an empty key
-            return 0
+          if type(k) == type({})
+            if (empty(k._VAL)
+               \|| k._VAL ==# [""]
+               \|| !empty(filter(copy(k._VAL), 'stridx(v:val, "\n") != -1')))
+              " Non-special mapping cannot have zero byte in key or an empty key
+              return 0
+            endif
+            let kstr = join(k._VAL, "\n")
+          else
+            let kstr = k
           endif
-          let kstr = join(k._VAL, "\n")
           if !has_key(akeys, kstr)
             " Protects from both missing and duplicate keys
             return 0

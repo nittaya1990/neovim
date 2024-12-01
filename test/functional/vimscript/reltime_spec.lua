@@ -1,7 +1,10 @@
-local helpers = require('test.functional.helpers')(after_each)
-local clear, eq, ok = helpers.clear,  helpers.eq, helpers.ok
-local neq, command, funcs  = helpers.neq, helpers.command, helpers.funcs
-local reltime, reltimestr, reltimefloat = funcs.reltime, funcs.reltimestr, funcs.reltimefloat
+local t = require('test.testutil')
+local n = require('test.functional.testnvim')()
+
+local clear, eq, ok = n.clear, t.eq, t.ok
+local neq, command, fn = t.neq, n.command, n.fn
+local matches = t.matches
+local reltime, reltimestr, reltimefloat = fn.reltime, fn.reltimestr, fn.reltimefloat
 
 describe('reltimestr(), reltimefloat()', function()
   before_each(clear)
@@ -12,10 +15,10 @@ describe('reltimestr(), reltimefloat()', function()
     local later = reltime()
     local elapsed = reltime(now)
 
-    neq(reltimestr(elapsed), '0.0')
+    neq('0.0', reltimestr(elapsed))
     ok(reltimefloat(elapsed) > 0.0)
     -- original vim test for < 0.1, but easily fails on travis
-    ok(nil ~= string.match(reltimestr(elapsed), "0%."))
+    matches('0%.', reltimestr(elapsed))
     ok(reltimefloat(elapsed) < 1.0)
 
     local same = reltime(now, now)
@@ -26,10 +29,10 @@ describe('reltimestr(), reltimefloat()', function()
     eq(0.0, reltimefloat(same))
 
     local differs = reltime(now, later)
-    neq(reltimestr(differs), '0.0')
+    neq('0.0', reltimestr(differs))
     ok(reltimefloat(differs) > 0.0)
     -- original vim test for < 0.1, but easily fails on travis
-    ok(nil ~= string.match(reltimestr(differs), "0%."))
+    matches('0%.', reltimestr(differs))
     ok(reltimefloat(differs) < 1.0)
   end)
 

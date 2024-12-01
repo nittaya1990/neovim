@@ -1,7 +1,7 @@
-#ifndef NVIM_OS_WIN_DEFS_H
-#define NVIM_OS_WIN_DEFS_H
+#pragma once
+// IWYU pragma: private, include "nvim/os/os_defs.h"
 
-#ifndef WIN32
+#ifndef MSWIN
 # error Header must be included only when compiling for Windows.
 #endif
 
@@ -36,7 +36,7 @@
 // Windows defines a RGB macro that produces 0x00bbggrr color values for use
 // with GDI. Our macro is different, and we don't use GDI.
 // Duplicated from macros.h to avoid include-order sensitivity.
-#define RGB_(r, g, b) ((r << 16) | (g << 8) | b)
+#define RGB_(r, g, b) (((r) << 16) | ((g) << 8) | (b))
 
 #ifdef _MSC_VER
 # ifndef inline
@@ -86,5 +86,3 @@ typedef int mode_t;
 #ifndef STDERR_FILENO
 # define STDERR_FILENO 2
 #endif
-
-#endif  // NVIM_OS_WIN_DEFS_H

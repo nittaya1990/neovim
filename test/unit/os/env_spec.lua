@@ -1,16 +1,14 @@
-local helpers = require('test.unit.helpers')(after_each)
-local itp = helpers.gen_itp(it)
+local t = require('test.unit.testutil')
+local itp = t.gen_itp(it)
 
-local cimport = helpers.cimport
-local eq = helpers.eq
-local neq = helpers.neq
-local ffi = helpers.ffi
-local cstr = helpers.cstr
-local to_cstr = helpers.to_cstr
-local NULL = helpers.NULL
+local cimport = t.cimport
+local eq = t.eq
+local neq = t.neq
+local ffi = t.ffi
+local cstr = t.cstr
+local to_cstr = t.to_cstr
+local NULL = t.NULL
 local OK = 0
-
-require('lfs')
 
 local cimp = cimport('./src/nvim/os/os.h')
 
@@ -64,7 +62,7 @@ describe('env.c', function()
       eq('non-empty', os.getenv(name))
     end)
 
-    itp("`overwrite` behavior", function()
+    itp('`overwrite` behavior', function()
       local name = 'NVIM_UNIT_TEST_SETENV_2N'
       local value = 'NVIM_UNIT_TEST_SETENV_2V'
       local value_updated = 'NVIM_UNIT_TEST_SETENV_2V_UPDATED'
@@ -81,7 +79,7 @@ describe('env.c', function()
     itp('appends :/foo/bar to $PATH', function()
       local original_path = os.getenv('PATH')
       eq(true, cimp.os_setenv_append_path(to_cstr('/foo/bar/baz.exe')))
-      eq(original_path..':/foo/bar', os.getenv('PATH'))
+      eq(original_path .. ':/foo/bar', os.getenv('PATH'))
     end)
 
     itp('avoids redundant separator when appending to $PATH #7377', function()
@@ -154,7 +152,7 @@ describe('env.c', function()
     local value = 'TESTVALUE'
     os_setenv(name, value, 1)
     eq(OK, os_unsetenv(name))
-    neq(os_getenv(name), value)
+    neq(value, os_getenv(name))
     -- Depending on the platform the var might be unset or set as ''
     assert.True(os_getenv(name) == nil or os_getenv(name) == '')
     if os_getenv(name) == nil then
@@ -168,7 +166,7 @@ describe('env.c', function()
       local test_value = 'NVIM_UNIT_TEST_GETENVNAME_AT_INDEX_1V'
       os_setenv(test_name, test_value, 1)
       local i = 0
-      local names = { }
+      local names = {}
       local found_name = false
       local name = cimp.os_getenvname_at_index(i)
       while name ~= NULL do
@@ -191,7 +189,7 @@ describe('env.c', function()
 
       if ffi.abi('64bit') then
         -- couldn't use a bigger number because it gets converted to
-        -- double somewere, should be big enough anyway
+        -- double somewhere, should be big enough anyway
         -- maxuint64 = ffi.new 'size_t', 18446744073709551615
         local maxuint64 = ffi.new('size_t', 18446744073709000000)
         eq(NULL, cimp.os_getenvname_at_index(maxuint64))
@@ -247,7 +245,7 @@ describe('env.c', function()
       local input = '~/foo ~ foo'
       local homedir = cstr(255, '')
       cimp.expand_env_esc(to_cstr('~'), homedir, 255, false, true, NULL)
-      local output_expected = ffi.string(homedir) .. "/foo ~ foo"
+      local output_expected = ffi.string(homedir) .. '/foo ~ foo'
       local output = cstr(255, '')
       cimp.expand_env_esc(to_cstr(input), output, 255, false, true, NULL)
       eq(ffi.string(output), ffi.string(output_expected))
@@ -258,7 +256,7 @@ describe('env.c', function()
       local dst = cstr(255, '')
       cimp.expand_env_esc(to_cstr('~'), dst, 255, false, true, NULL)
       local homedir = ffi.string(dst)
-      local output_expected = homedir .. "/foo " .. homedir .. " foo"
+      local output_expected = homedir .. '/foo ' .. homedir .. ' foo'
       local output = cstr(255, '')
       cimp.expand_env_esc(input, output, 255, false, false, NULL)
       eq(output_expected, ffi.string(output))
@@ -266,11 +264,12 @@ describe('env.c', function()
 
     itp('does not crash #3725', function()
       local name_out = ffi.new('char[100]')
-      cimp.os_get_user_name(name_out, 100)
+      cimp.os_get_username(name_out, 100)
       local curuser = ffi.string(name_out)
 
-      local src = to_cstr("~"..curuser.."/Vcs/django-rest-framework/rest_framework/renderers.py")
-      local dst = cstr(256, "~"..curuser)
+      local src =
+        to_cstr('~' .. curuser .. '/Vcs/django-rest-framework/rest_framework/renderers.py')
+      local dst = cstr(256, '~' .. curuser)
       cimp.expand_env_esc(src, dst, 256, false, false, NULL)
       local len = string.len(ffi.string(dst))
       assert.True(len > 56)
@@ -285,7 +284,7 @@ describe('env.c', function()
       cimp.expand_env_esc(input, output, 5, false, true, NULL)
       -- Make sure the first few characters are copied properly and that there is a
       -- terminating null character
-      for i=0,3 do
+      for i = 0, 3 do
         eq(input[i], output[i])
       end
       eq(0, output[4])
@@ -306,10 +305,10 @@ describe('env.c', function()
       -- terminating null character
       -- expand_env_esc SHOULD NOT expand the variable if there is not enough space to
       -- contain the result
-      for i=0,3 do
-        eq(output[i], input[i])
+      for i = 0, 3 do
+        eq(input[i], output[i])
       end
-      eq(output[4], 0)
+      eq(0, output[4])
     end)
   end)
 end)

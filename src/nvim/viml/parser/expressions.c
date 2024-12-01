@@ -1,10 +1,7 @@
-// This is an open source non-commercial project. Dear PVS-Studio, please check
-// it. PVS-Studio Static Code Analyzer for C, C++ and C#: http://www.viva64.com
-
-/// VimL expression parser
+/// Vimscript expression parser
 
 // Planned incompatibilities (to be included into vim_diff.txt when this parser
-// will be an actual part of VimL evaluation process):
+// will be an actual part of Vimscript evaluation process):
 //
 // 1. Expressions are first fully parsed and only then executed.  This means
 //    that while ":echo [system('touch abc')" will create file "abc" in Vim and
@@ -53,20 +50,23 @@
 #include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
-#include "nvim/ascii.h"
-#include "nvim/assert.h"
+#include "klib/kvec.h"
+#include "nvim/ascii_defs.h"
+#include "nvim/assert_defs.h"
 #include "nvim/charset.h"
-#include "nvim/eval/typval.h"
-#include "nvim/lib/kvec.h"
+#include "nvim/eval.h"
+#include "nvim/gettext_defs.h"
+#include "nvim/keycodes.h"
+#include "nvim/macros_defs.h"
+#include "nvim/mbyte.h"
 #include "nvim/memory.h"
-#include "nvim/types.h"
-#include "nvim/vim.h"
+#include "nvim/types_defs.h"
 #include "nvim/viml/parser/expressions.h"
 #include "nvim/viml/parser/parser.h"
-
-#define vim_str2nr(s, ...) vim_str2nr((const char_u *)(s), __VA_ARGS__)
 
 typedef kvec_withinit_t(ExprASTNode **, 16) ExprASTStack;
 
@@ -85,7 +85,7 @@ typedef enum {
 
 /// Parse type: what is being parsed currently
 typedef enum {
-  /// Parsing regular VimL expression
+  /// Parsing regular Vimscript expression
   kEPTExpr = 0,
   /// Parsing lambda arguments
   ///
@@ -167,7 +167,7 @@ static inline float_T scale_number(const float_T num, const uint8_t base,
   return ret;
 }
 
-/// Get next token for the VimL expression input
+/// Get next token for the Vimscript expression input
 ///
 /// @param  pstate  Parser state.
 /// @param[in]  flags  Flags, @see LexExprFlags.
@@ -204,40 +204,40 @@ LexExprToken viml_pexpr_next_token(ParserState *const pstate, const int flags)
     } \
   } while (0)
   switch (schar) {
-    // Paired brackets.
+  // Paired brackets.
 #define BRACKET(typ, opning, clsing) \
-case opning: \
-case clsing: { \
-  ret.type = typ; \
-  ret.data.brc.closing = (schar == clsing); \
-  break; \
-}
-    BRACKET(kExprLexParenthesis, '(', ')')
-    BRACKET(kExprLexBracket, '[', ']')
-    BRACKET(kExprLexFigureBrace, '{', '}')
+  case opning: \
+  case clsing: { \
+      ret.type = typ; \
+      ret.data.brc.closing = (schar == clsing); \
+      break; \
+  }
+  BRACKET(kExprLexParenthesis, '(', ')')
+  BRACKET(kExprLexBracket, '[', ']')
+  BRACKET(kExprLexFigureBrace, '{', '}')
 #undef BRACKET
 
-    // Single character tokens without data.
+  // Single character tokens without data.
 #define CHAR(typ, ch) \
-case ch: { \
-  ret.type = typ; \
-  break; \
-}
-    CHAR(kExprLexQuestion, '?')
-    CHAR(kExprLexColon, ':')
-    CHAR(kExprLexComma, ',')
+  case ch: { \
+      ret.type = typ; \
+      break; \
+  }
+  CHAR(kExprLexQuestion, '?')
+  CHAR(kExprLexColon, ':')
+  CHAR(kExprLexComma, ',')
 #undef CHAR
 
-    // Multiplication/division/modulo.
+  // Multiplication/division/modulo.
 #define MUL(mul_type, ch) \
-case ch: { \
-  ret.type = kExprLexMultiplication; \
-  ret.data.mul.type = mul_type; \
-  break; \
-}
-    MUL(kExprLexMulMul, '*')
-    MUL(kExprLexMulDiv, '/')
-    MUL(kExprLexMulMod, '%')
+  case ch: { \
+      ret.type = kExprLexMultiplication; \
+      ret.data.mul.type = mul_type; \
+      break; \
+  }
+  MUL(kExprLexMulMul, '*')
+  MUL(kExprLexMulDiv, '/')
+  MUL(kExprLexMulMod, '%')
 #undef MUL
 
 #define CHARREG(typ, cond) \
@@ -363,7 +363,7 @@ case ch: { \
       // uses recorded position to scale number down when processing exponent.
       float_T significand_part = 0;
       uvarnumber_T exp_part = 0;
-      const size_t frac_size = (size_t)(frac_end - frac_start);
+      const size_t frac_size = frac_end - frac_start;
       for (size_t i = 0; i < frac_end; i++) {
         if (i == frac_start - 1) {
           continue;
@@ -372,7 +372,7 @@ case ch: { \
       }
       if (exp_start) {
         vim_str2nr(pline.data + exp_start, NULL, NULL, 0, NULL, &exp_part,
-                   (int)(ret.len - exp_start), false);
+                   (int)(ret.len - exp_start), false, NULL);
       }
       if (exp_negative) {
         exp_part += frac_size;
@@ -390,7 +390,7 @@ case ch: { \
       int len;
       int prep;
       vim_str2nr(pline.data, &prep, &len, STR2NR_ALL, NULL,
-                 &ret.data.num.val.integer, (int)pline.size, false);
+                 &ret.data.num.val.integer, (int)pline.size, false, NULL);
       ret.len = (size_t)len;
       const uint8_t bases[] = {
         [0] = 10,
@@ -541,8 +541,7 @@ case ch: { \
       ret.data.opt.len = 4;
       ret.len += 4;
     } else {
-      for (; p < e && ASCII_ISALPHA(*p); p++) {
-      }
+      for (; p < e && ASCII_ISALPHA(*p); p++) {}
       ret.data.opt.len = (size_t)(p - ret.data.opt.name);
       if (ret.data.opt.len == 0) {
         OPTNAMEMISS(ret);
@@ -631,8 +630,8 @@ case ch: { \
     GET_CCS(ret, pline);
     ret.data.cmp.inv = (schar == '<');
     ret.data.cmp.type = ((ret.data.cmp.inv ^ haseqsign)
-                           ? kExprCmpGreaterOrEqual
-                           : kExprCmpGreater);
+                         ? kExprCmpGreaterOrEqual
+                         : kExprCmpGreater);
     break;
   }
 
@@ -653,16 +652,16 @@ case ch: { \
 
     // Sign or augmented assignment.
 #define CHAR_OR_ASSIGN(ch, ch_type, ass_type) \
-case ch: { \
-  if (pline.size > 1 && pline.data[1] == '=') { \
-    ret.len++; \
-    ret.type = kExprLexAssignment; \
-    ret.data.ass.type = ass_type; \
-  } else { \
-    ret.type = ch_type; \
-  } \
-  break; \
-}
+  case ch: { \
+      if (pline.size > 1 && pline.data[1] == '=') { \
+        ret.len++; \
+        ret.type = kExprLexAssignment; \
+        ret.data.ass.type = ass_type; \
+      } else { \
+        ret.type = ch_type; \
+      } \
+      break; \
+  }
     CHAR_OR_ASSIGN('+', kExprLexPlus, kExprAsgnAdd)
     CHAR_OR_ASSIGN('.', kExprLexDot, kExprAsgnConcat)
 #undef CHAR_OR_ASSIGN
@@ -697,8 +696,7 @@ case ch: { \
 
   // Everything else is not valid.
   default:
-    ret.len = (size_t)utfc_ptr2len_len((const char_u *)pline.data,
-                                       (int)pline.size);
+    ret.len = (size_t)utfc_ptr2len_len(pline.data, (int)pline.size);
     ret.type = kExprLexInvalid;
     ret.data.err.type = kExprLexPlainIdentifier;
     ret.data.err.msg = _("E15: Unidentified character: %.*s");
@@ -811,19 +809,19 @@ const char *viml_pexpr_repr_token(const ParserState *const pstate, const LexExpr
          eltkn_type_tab[token.type]);
   switch (token.type) {
 #define TKNARGS(tkn_type, ...) \
-case tkn_type: { \
-  ADDSTR(__VA_ARGS__); \
-  break; \
-}
-    TKNARGS(kExprLexComparison, "(type=%s,ccs=%s,inv=%i)",
-            eltkn_cmp_type_tab[token.data.cmp.type],
-            ccs_tab[token.data.cmp.ccs],
-            (int)token.data.cmp.inv)
-    TKNARGS(kExprLexMultiplication, "(type=%s)",
-            eltkn_mul_type_tab[token.data.mul.type])
-    TKNARGS(kExprLexAssignment, "(type=%s)",
-            expr_asgn_type_tab[token.data.ass.type])
-    TKNARGS(kExprLexRegister, "(name=%s)", intchar2str(token.data.reg.name))
+  case tkn_type: { \
+      ADDSTR(__VA_ARGS__); \
+      break; \
+  }
+  TKNARGS(kExprLexComparison, "(type=%s,ccs=%s,inv=%i)",
+          eltkn_cmp_type_tab[token.data.cmp.type],
+          ccs_tab[token.data.cmp.ccs],
+          (int)token.data.cmp.inv)
+  TKNARGS(kExprLexMultiplication, "(type=%s)",
+          eltkn_mul_type_tab[token.data.mul.type])
+  TKNARGS(kExprLexAssignment, "(type=%s)",
+          expr_asgn_type_tab[token.data.ass.type])
+  TKNARGS(kExprLexRegister, "(name=%s)", intchar2str(token.data.reg.name))
   case kExprLexDoubleQuotedString:
     TKNARGS(kExprLexSingleQuotedString, "(closed=%i)",
             (int)token.data.str.closed)
@@ -936,7 +934,6 @@ static const char *intchar2str(const int ch)
 }
 
 #ifdef UNIT_TESTING
-# include <stdio.h>
 
 REAL_FATTR_UNUSED
 static inline void viml_pexpr_debug_print_ast_node(const ExprASTNode *const *const eastnode_p,
@@ -1036,7 +1033,7 @@ void viml_pexpr_free_ast(ExprAST ast)
     ExprASTNode **const cur_node = kv_last(ast_stack);
 #ifndef NDEBUG
     // Explicitly check for AST recursiveness.
-    for (size_t i = 0 ; i < kv_size(ast_stack) - 1 ; i++) {
+    for (size_t i = 0; i < kv_size(ast_stack) - 1; i++) {
       assert(*kv_A(ast_stack, i) != *cur_node);
     }
 #endif
@@ -1166,7 +1163,7 @@ static struct {
   // represented as "list(comma(a, comma(b, comma(c, d))))" then if it is
   // "list(comma(comma(comma(a, b), c), d))" in which case you will need to
   // traverse all three comma() structures. And with comma operator (including
-  // actual comma operator from C which is not present in VimL) nobody cares
+  // actual comma operator from C which is not present in Vimscript) nobody cares
   // about associativity, only about order of execution.
   [kExprNodeComma] = { kEOpLvlComma, kEOpAssRight },
 
@@ -1267,21 +1264,12 @@ static bool viml_pexpr_handle_bop(const ParserState *const pstate, ExprASTStack 
                                    || bop_node->type == kExprNodeSubscript)
                                   ? kEOpLvlSubscript
                                   : node_lvl(*bop_node));
-#ifndef NDEBUG
-  const ExprOpAssociativity bop_node_ass = (
-                                            (bop_node->type == kExprNodeCall
-                                             || bop_node->type == kExprNodeSubscript)
-      ? kEOpAssLeft
-      : node_ass(*bop_node));
-#endif
   do {
     ExprASTNode **new_top_node_p = kv_last(*ast_stack);
     ExprASTNode *new_top_node = *new_top_node_p;
     assert(new_top_node != NULL);
     const ExprOpLvl new_top_node_lvl = node_lvl(*new_top_node);
     const ExprOpAssociativity new_top_node_ass = node_ass(*new_top_node);
-    assert(bop_node_lvl != new_top_node_lvl
-           || bop_node_ass == new_top_node_ass);
     if (top_node_p != NULL
         && ((bop_node_lvl > new_top_node_lvl
              || (bop_node_lvl == new_top_node_lvl
@@ -1525,7 +1513,6 @@ static inline void east_set_error(const ParserState *const pstate, ExprASTError 
     assert(want_node == kENodeOperator); \
     /* Operator: may only be curly braces name, but only under certain */ \
     /* conditions. */ \
-\
     /* First condition is that there is no space before a part of complex */ \
     /* identifier. */ \
     if (prev_token.type == kExprLexSpacing) { \
@@ -1534,29 +1521,28 @@ static inline void east_set_error(const ParserState *const pstate, ExprASTError 
     switch ((*top_node_p)->type) { \
     /* Second is that previous node is one of the identifiers: */ \
     /* complex, plain, curly braces. */ \
-\
     /* TODO(ZyX-I): Extend syntax to allow ${expr}. This is needed to */ \
     /* handle environment variables like those bash uses for */ \
     /* `export -f`: their names consist not only of alphanumeric */ \
-    /* characetrs. */ \
+    /* characters. */ \
     case kExprNodeComplexIdentifier: \
     case kExprNodePlainIdentifier: \
     case kExprNodeCurlyBracesIdentifier: { \
-      NEW_NODE_WITH_CUR_POS(cur_node, kExprNodeComplexIdentifier); \
-      cur_node->len = 0; \
-      cur_node->children = *top_node_p; \
-      *top_node_p = cur_node; \
-      kvi_push(ast_stack, &cur_node->children->next); \
-      ExprASTNode **const new_top_node_p = kv_last(ast_stack); \
-      assert(*new_top_node_p == NULL); \
-      new_ident_node_code; \
-      *new_top_node_p = cur_node; \
-      HL_CUR_TOKEN(hl); \
-      break; \
+        NEW_NODE_WITH_CUR_POS(cur_node, kExprNodeComplexIdentifier); \
+        cur_node->len = 0; \
+        cur_node->children = *top_node_p; \
+        *top_node_p = cur_node; \
+        kvi_push(ast_stack, &cur_node->children->next); \
+        ExprASTNode **const new_top_node_p = kv_last(ast_stack); \
+        assert(*new_top_node_p == NULL); \
+        new_ident_node_code; \
+        *new_top_node_p = cur_node; \
+        HL_CUR_TOKEN(hl); \
+        break; \
     } \
     default: { \
-      OP_MISSING; \
-      break; \
+        OP_MISSING; \
+        break; \
     } \
     } \
   } while (0)
@@ -1594,7 +1580,7 @@ typedef struct {
 ///                        string is a regex.
 /// @param[in]  is_invalid  Whether currently processed token is not valid.
 static void parse_quoted_string(ParserState *const pstate, ExprASTNode *const node,
-                                const LexExprToken token, const ExprASTStack ast_stack,
+                                const LexExprToken token, const ExprASTStack *ast_stack,
                                 const bool is_invalid)
   FUNC_ATTR_NONNULL_ALL
 {
@@ -1654,10 +1640,11 @@ static void parse_quoted_string(ParserState *const pstate, ExprASTNode *const no
         }
         switch (*p) {
         // A "\<x>" form occupies at least 4 characters, and produces up to
-        // 6 characters: reserve space for 2 extra, but do not compute actual
-        // length just now, it would be costy.
+        // to 9 characters (6 for the char and 3 for a modifier):
+        // reserve space for 5 extra, but do not compute actual length
+        // just now, it would be costly.
         case '<':
-          size += 2;
+          size += 5;
           break;
         // Hexadecimal, always single byte, but at least three bytes each.
         case 'x':
@@ -1749,19 +1736,19 @@ static void parse_quoted_string(ParserState *const pstate, ExprASTNode *const no
         const char *const v_p_start = v_p;
         switch (*p) {
 #define SINGLE_CHAR_ESC(ch, real_ch) \
-case ch: { \
-  *v_p++ = real_ch; \
-  p++; \
-  break; \
-}
-          SINGLE_CHAR_ESC('b', BS)
-          SINGLE_CHAR_ESC('e', ESC)
-          SINGLE_CHAR_ESC('f', FF)
-          SINGLE_CHAR_ESC('n', NL)
-          SINGLE_CHAR_ESC('r', CAR)
-          SINGLE_CHAR_ESC('t', TAB)
-          SINGLE_CHAR_ESC('"', '"')
-          SINGLE_CHAR_ESC('\\', '\\')
+  case ch: { \
+      *v_p++ = real_ch; \
+      p++; \
+      break; \
+  }
+        SINGLE_CHAR_ESC('b', BS)
+        SINGLE_CHAR_ESC('e', ESC)
+        SINGLE_CHAR_ESC('f', FF)
+        SINGLE_CHAR_ESC('n', NL)
+        SINGLE_CHAR_ESC('r', CAR)
+        SINGLE_CHAR_ESC('t', TAB)
+        SINGLE_CHAR_ESC('"', '"')
+        SINGLE_CHAR_ESC('\\', '\\')
 #undef SINGLE_CHAR_ESC
 
         // Hexadecimal or unicode.
@@ -1790,7 +1777,7 @@ case ch: { \
             if (is_hex) {
               *v_p++ = (char)nr;
             } else {
-              v_p += utf_char2bytes(nr, (char_u *)v_p);
+              v_p += utf_char2bytes(nr, v_p);
             }
           } else {
             is_unknown = true;
@@ -1819,20 +1806,24 @@ case ch: { \
         }
         // Special key, e.g.: "\<C-W>"
         case '<': {
-          const size_t special_len = (
-                                      trans_special((const char_u **)&p, (size_t)(e - p),
-                                                    (char_u *)v_p, true, true));
+          int flags = FSK_KEYCODE | FSK_IN_STRING;
+
+          if (p[1] != '*') {
+            flags |= FSK_SIMPLIFY;
+          }
+          const size_t special_len = trans_special(&p, (size_t)(e - p),
+                                                   v_p, flags, false, NULL);
           if (special_len != 0) {
             v_p += special_len;
           } else {
             is_unknown = true;
-            mb_copy_char((const char_u **)&p, (char_u **)&v_p);
+            mb_copy_char(&p, &v_p);
           }
           break;
         }
         default:
           is_unknown = true;
-          mb_copy_char((const char_u **)&p, (char_u **)&v_p);
+          mb_copy_char(&p, &v_p);
           break;
         }
         if (pstate->colors) {
@@ -1910,7 +1901,7 @@ static const uint8_t base_to_prefix_length[] = {
   [16] = 2,
 };
 
-/// Parse one VimL expression
+/// Parse one Vimscript expression
 ///
 /// @param  pstate  Parser state.
 /// @param[in]  flags  Additional flags, see ExprParserFlags
@@ -1964,8 +1955,8 @@ ExprAST viml_pexpr_parse(ParserState *const pstate, const int flags)
                                                 || ((*kv_Z(ast_stack, 1))->type != kExprNodeConcat
                                                     && ((*kv_Z(ast_stack, 1))->type
                                                         != kExprNodeConcatOrSubscript))))
-           ? kELFlagAllowFloat
-           : 0));
+                                           ? kELFlagAllowFloat
+                                           : 0));
     LexExprToken cur_token = viml_pexpr_next_token(pstate,
                                                    want_node_to_lexer_flags[want_node] |
                                                    lexer_additional_flags);
@@ -2032,9 +2023,9 @@ viml_pexpr_parse_process_token:
     const bool node_is_key = (
                               is_concat_or_subscript
                               && (cur_token.type == kExprLexPlainIdentifier
-            ? (!cur_token.data.var.autoload
-               && cur_token.data.var.scope == kExprVarScopeMissing)
-            : (cur_token.type == kExprLexNumber))
+                                  ? (!cur_token.data.var.autoload
+                                     && cur_token.data.var.scope == kExprVarScopeMissing)
+                                  : (cur_token.type == kExprLexNumber))
                               && prev_token.type != kExprLexSpacing);
     if (is_concat_or_subscript && !node_is_key) {
       // Note: in Vim "d. a" (this is the reason behind `prev_token.type !=
@@ -2121,6 +2112,22 @@ viml_pexpr_parse_process_token:
     assert(kv_size(pt_stack));
     const ExprASTParseType cur_pt = kv_last(pt_stack);
     assert(lambda_node == NULL || cur_pt == kEPTLambdaArguments);
+#define SIMPLE_UB_OP(op) \
+  case kExprLex##op: { \
+      if (want_node == kENodeValue) { \
+        /* Value level: assume unary operator. */ \
+        NEW_NODE_WITH_CUR_POS(cur_node, kExprNodeUnary##op); \
+        *top_node_p = cur_node; \
+        kvi_push(ast_stack, &cur_node->children); \
+        HL_CUR_TOKEN(Unary##op); \
+      } else { \
+        NEW_NODE_WITH_CUR_POS(cur_node, kExprNodeBinary##op); \
+        ADD_OP_NODE(cur_node); \
+        HL_CUR_TOKEN(Binary##op); \
+      } \
+      want_node = kENodeValue; \
+      break; \
+  }
     switch (tok_type) {
     case kExprLexMissing:
     case kExprLexSpacing:
@@ -2142,33 +2149,17 @@ viml_pexpr_parse_process_token:
       HL_CUR_TOKEN(Register);
       break;
     }
-#define SIMPLE_UB_OP(op) \
-case kExprLex##op: { \
-  if (want_node == kENodeValue) { \
-    /* Value level: assume unary operator. */ \
-    NEW_NODE_WITH_CUR_POS(cur_node, kExprNodeUnary##op); \
-    *top_node_p = cur_node; \
-    kvi_push(ast_stack, &cur_node->children); \
-    HL_CUR_TOKEN(Unary##op); \
-  } else { \
-    NEW_NODE_WITH_CUR_POS(cur_node, kExprNodeBinary##op); \
-    ADD_OP_NODE(cur_node); \
-    HL_CUR_TOKEN(Binary##op); \
-  } \
-  want_node = kENodeValue; \
-  break; \
-}
       SIMPLE_UB_OP(Plus)
       SIMPLE_UB_OP(Minus)
 #undef SIMPLE_UB_OP
 #define SIMPLE_B_OP(op, msg) \
-case kExprLex##op: { \
-  ADD_VALUE_IF_MISSING(_("E15: Unexpected " msg ": %.*s")); \
-  NEW_NODE_WITH_CUR_POS(cur_node, kExprNode##op); \
-  HL_CUR_TOKEN(op); \
-  ADD_OP_NODE(cur_node); \
-  break; \
-}
+  case kExprLex##op: { \
+      ADD_VALUE_IF_MISSING(_("E15: Unexpected " msg ": %.*s")); \
+      NEW_NODE_WITH_CUR_POS(cur_node, kExprNode##op); \
+      HL_CUR_TOKEN(op); \
+      ADD_OP_NODE(cur_node); \
+      break; \
+  }
       SIMPLE_B_OP(Or, "or operator")
       SIMPLE_B_OP(And, "and operator")
 #undef SIMPLE_B_OP
@@ -2176,14 +2167,14 @@ case kExprLex##op: { \
       ADD_VALUE_IF_MISSING(_("E15: Unexpected multiplication-like operator: %.*s"));
       switch (cur_token.data.mul.type) {
 #define MUL_OP(lex_op_tail, node_op_tail) \
-case kExprLexMul##lex_op_tail: { \
-  NEW_NODE_WITH_CUR_POS(cur_node, kExprNode##node_op_tail); \
-  HL_CUR_TOKEN(node_op_tail); \
-  break; \
-}
-        MUL_OP(Mul, Multiplication)
-        MUL_OP(Div, Division)
-        MUL_OP(Mod, Mod)
+  case kExprLexMul##lex_op_tail: { \
+      NEW_NODE_WITH_CUR_POS(cur_node, kExprNode##node_op_tail); \
+      HL_CUR_TOKEN(node_op_tail); \
+      break; \
+  }
+      MUL_OP(Mul, Multiplication)
+      MUL_OP(Div, Division)
+      MUL_OP(Mod, Mod)
 #undef MUL_OP
       }
       ADD_OP_NODE(cur_node);
@@ -2202,8 +2193,8 @@ case kExprLexMul##lex_op_tail: { \
         cur_node->data.opt.ident_len = 0;
         cur_node->data.opt.scope = (
                                     cur_token.len == 3
-              ? (ExprOptScope)pline.data[cur_token.start.col + 1]
-              : kExprOptScopeUnspecified);
+                                    ? (ExprOptScope)pline.data[cur_token.start.col + 1]
+                                    : kExprOptScopeUnspecified);
       } else {
         cur_node->data.opt.ident = cur_token.data.opt.name;
         cur_node->data.opt.ident_len = cur_token.data.opt.len;
@@ -2492,7 +2483,6 @@ viml_pexpr_parse_bracket_closing_error:
           NEW_NODE_WITH_CUR_POS(cur_node, kExprNodeListLiteral);
           *top_node_p = cur_node;
           kvi_push(ast_stack, &cur_node->children);
-          want_node = kENodeValue;
           if (cur_pt == kEPTAssignment) {
             // Additional assignment parse type allows to easily forbid nested
             // lists.
@@ -2644,6 +2634,7 @@ viml_pexpr_parse_figure_brace_closing_error:
           kvi_push(pt_stack, kEPTLambdaArguments);
           lambda_node = cur_node;
         } else {
+          // uncrustify:off
           ADD_IDENT(do {
             NEW_NODE_WITH_CUR_POS(cur_node,
                                   kExprNodeCurlyBracesIdentifier);
@@ -2658,6 +2649,7 @@ viml_pexpr_parse_figure_brace_closing_error:
             want_node = kENodeValue;
           } while (0),
                     Curly);
+          // uncrustify:on
         }
         if (pt_is_assignment(cur_pt)
             && !pt_is_assignment(kv_last(pt_stack))) {
@@ -2706,14 +2698,14 @@ viml_pexpr_parse_figure_brace_closing_error:
       break;
     case kExprLexPlainIdentifier: {
       const ExprVarScope scope = (cur_token.type == kExprLexInvalid
-                                    ? kExprVarScopeMissing
-                                    : cur_token.data.var.scope);
+                                  ? kExprVarScopeMissing
+                                  : cur_token.data.var.scope);
       if (want_node == kENodeValue) {
         want_node = kENodeOperator;
         NEW_NODE_WITH_CUR_POS(cur_node,
                               (node_is_key
-                                 ? kExprNodePlainKey
-                                 : kExprNodePlainIdentifier));
+                               ? kExprNodePlainKey
+                               : kExprNodePlainIdentifier));
         cur_node->data.var.scope = scope;
         const size_t scope_shift = (scope == kExprVarScopeMissing ? 0 : 2);
         cur_node->data.var.ident = (pline.data + cur_token.start.col
@@ -2731,10 +2723,11 @@ viml_pexpr_parse_figure_brace_closing_error:
                                                   scope_shift),
                               cur_token.len - scope_shift,
                               (node_is_key
-                                 ? HL(IdentifierKey)
-                                 : HL(IdentifierName)));
+                               ? HL(IdentifierKey)
+                               : HL(IdentifierName)));
       } else {
         if (scope == kExprVarScopeMissing) {
+          // uncrustify:off
           ADD_IDENT(do {
               NEW_NODE_WITH_CUR_POS(cur_node, kExprNodePlainIdentifier);
               cur_node->data.var.scope = scope;
@@ -2743,6 +2736,7 @@ viml_pexpr_parse_figure_brace_closing_error:
               want_node = kENodeOperator;
             } while (0),
                     IdentifierName);
+          // uncrustify:on
         } else {
           OP_MISSING;
         }
@@ -2858,7 +2852,7 @@ viml_pexpr_parse_no_paren_closing_error: {}
         case kENodeOperator:
           if (prev_token.type == kExprLexSpacing) {
             // For some reason "function (args)" is a function call, but
-            // "(funcref) (args)" is not. AFAIR this somehow involves
+            // "(funcref) (args)" is not. As far as I remember this somehow involves
             // compatibility and Bram was commenting that this is
             // intentionally inconsistent and he is not very happy with the
             // situation himself.
@@ -2899,17 +2893,17 @@ viml_pexpr_parse_no_paren_closing_error: {}
         // different error numbers: "E114: Missing quote" and
         // "E115: Missing quote".
         ERROR_FROM_TOKEN_AND_MSG(cur_token, (is_double
-                          ? _("E114: Missing double quote: %.*s")
-                          : _("E115: Missing single quote: %.*s")));
+                                             ? _("E114: Missing double quote: %.*s")
+                                             : _("E115: Missing single quote: %.*s")));
       }
       if (want_node == kENodeOperator) {
         OP_MISSING;
       }
       NEW_NODE_WITH_CUR_POS(cur_node, (is_double
-                       ? kExprNodeDoubleQuotedString
-                       : kExprNodeSingleQuotedString));
+                                       ? kExprNodeDoubleQuotedString
+                                       : kExprNodeSingleQuotedString));
       *top_node_p = cur_node;
-      parse_quoted_string(pstate, cur_node, cur_token, ast_stack, is_invalid);
+      parse_quoted_string(pstate, cur_node, cur_token, &ast_stack, is_invalid);
       want_node = kENodeOperator;
       break;
     }
@@ -2931,11 +2925,11 @@ viml_pexpr_parse_no_paren_closing_error: {}
       cur_node->data.ass.type = cur_token.data.ass.type;
       switch (cur_token.data.ass.type) {
 #define HL_ASGN(asgn, hl) \
-case kExprAsgn##asgn: { HL_CUR_TOKEN(hl); break; }
-        HL_ASGN(Plain, PlainAssignment)
-        HL_ASGN(Add, AssignmentWithAddition)
-        HL_ASGN(Subtract, AssignmentWithSubtraction)
-        HL_ASGN(Concat, AssignmentWithConcatenation)
+  case kExprAsgn##asgn: { HL_CUR_TOKEN(hl); break; }
+      HL_ASGN(Plain, PlainAssignment)
+      HL_ASGN(Add, AssignmentWithAddition)
+      HL_ASGN(Subtract, AssignmentWithSubtraction)
+      HL_ASGN(Concat, AssignmentWithConcatenation)
 #undef HL_ASGN
       }
       ADD_OP_NODE(cur_node);
@@ -3011,8 +3005,7 @@ viml_pexpr_parse_end:
         break;
       case kExprNodeCurlyBracesIdentifier:
         // Until trailing "}" it is impossible to distinguish curly braces
-        // identifier and dictionary, so it must not appear in the stack like
-        // this.
+        // identifier and Dict, so it must not appear in the stack like this.
         abort();
       case kExprNodeInteger:
       case kExprNodeFloat:
@@ -3065,7 +3058,7 @@ viml_pexpr_parse_end:
   }
   kvi_destroy(ast_stack);
   return ast;
-}  // NOLINT(readability/fn_size)
+}
 
 #undef NEW_NODE
 #undef HL

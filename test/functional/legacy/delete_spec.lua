@@ -1,7 +1,9 @@
-local helpers = require('test.functional.helpers')(after_each)
-local clear, source = helpers.clear, helpers.source
-local eq, eval, command = helpers.eq, helpers.eval, helpers.command
-local exc_exec = helpers.exc_exec
+local t = require('test.testutil')
+local n = require('test.functional.testnvim')()
+
+local clear, source = n.clear, n.source
+local eq, eval, command = t.eq, n.eval, n.command
+local exc_exec = n.exc_exec
 
 describe('Test for delete()', function()
   before_each(clear)
@@ -22,25 +24,6 @@ describe('Test for delete()', function()
     command("call mkdir('Xdir1')")
     eq(1, eval("isdirectory('Xdir1')"))
     eq(0, eval("delete('Xdir1', 'd')"))
-    eq(0, eval("isdirectory('Xdir1')"))
-    eq(-1, eval("delete('Xdir1', 'd')"))
-  end)
-  it('recursive delete', function()
-    command("call mkdir('Xdir1')")
-    command("call mkdir('Xdir1/subdir')")
-    command("call mkdir('Xdir1/empty')")
-    command('split Xdir1/Xfile')
-    command("call setline(1, ['a', 'b'])")
-    command('w')
-    command('w Xdir1/subdir/Xfile')
-    command('close')
-
-    eq(1, eval("isdirectory('Xdir1')"))
-    eq(eval("['a', 'b']"), eval("readfile('Xdir1/Xfile')"))
-    eq(1, eval("isdirectory('Xdir1/subdir')"))
-    eq(eval("['a', 'b']"), eval("readfile('Xdir1/subdir/Xfile')"))
-    eq(1, eval("'Xdir1/empty'->isdirectory()"))
-    eq(0, eval("delete('Xdir1', 'rf')"))
     eq(0, eval("isdirectory('Xdir1')"))
     eq(-1, eval("delete('Xdir1', 'd')"))
   end)
@@ -67,10 +50,10 @@ describe('Test for delete()', function()
 
   it('symlink directory delete', function()
     command("call mkdir('Xdir1')")
-    if helpers.iswin() then
-      command("silent !mklink /j Xlink Xdir1")
+    if t.is_os('win') then
+      command('silent !mklink /j Xlink Xdir1')
     else
-      command("silent !ln -s Xdir1 Xlink")
+      command('silent !ln -s Xdir1 Xlink')
     end
     eq(1, eval("isdirectory('Xdir1')"))
     eq(1, eval("isdirectory('Xlink')"))
@@ -80,45 +63,8 @@ describe('Test for delete()', function()
     eq(0, eval("delete('Xdir1', 'd')"))
   end)
 
-  it('symlink recursive delete', function()
-    source([[
-      call mkdir('Xdir3')
-      call mkdir('Xdir3/subdir')
-      call mkdir('Xdir4')
-      split Xdir3/Xfile
-      call setline(1, ['a', 'b'])
-      w
-      w Xdir3/subdir/Xfile
-      w Xdir4/Xfile
-      close
-      if has('win32')
-        silent !mklink /j Xdir3\Xlink Xdir4
-      else
-        silent !ln -s ../Xdir4 Xdir3/Xlink
-      endif
-    ]])
-
-    eq(1, eval("isdirectory('Xdir3')"))
-    eq(eval("['a', 'b']"), eval("readfile('Xdir3/Xfile')"))
-    eq(1, eval("isdirectory('Xdir3/subdir')"))
-    eq(eval("['a', 'b']"), eval("readfile('Xdir3/subdir/Xfile')"))
-    eq(1, eval("isdirectory('Xdir4')"))
-    eq(1, eval("isdirectory('Xdir3/Xlink')"))
-    eq(eval("['a', 'b']"), eval("readfile('Xdir4/Xfile')"))
-
-    eq(0, eval("delete('Xdir3', 'rf')"))
-    eq(0, eval("isdirectory('Xdir3')"))
-    eq(-1, eval("delete('Xdir3', 'd')"))
-    -- symlink is deleted, not the directory it points to
-    eq(1, eval("isdirectory('Xdir4')"))
-    eq(eval("['a', 'b']"), eval("readfile('Xdir4/Xfile')"))
-    eq(0, eval("delete('Xdir4/Xfile')"))
-    eq(0, eval("delete('Xdir4', 'd')"))
-  end)
-
   it('gives correct emsgs', function()
     eq('Vim(call):E474: Invalid argument', exc_exec("call delete('')"))
-    eq('Vim(call):E15: Invalid expression: 0',
-       exc_exec("call delete('foo', 0)"))
+    eq('Vim(call):E15: Invalid expression: "0"', exc_exec("call delete('foo', 0)"))
   end)
 end)

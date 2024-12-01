@@ -1,7 +1,13 @@
 " netrwPlugin.vim: Handles file transfer and remote directory listing across a network
 "            PLUGIN SECTION
-" Date:		Feb 09, 2021
-" Maintainer:	Charles E Campbell <NcampObell@SdrPchip.AorgM-NOSPAM>
+" Maintainer:	This runtime file is looking for a new maintainer.
+" Date:		Sep 09, 2021
+" Last Change:
+"   2024 May 08 by Vim Project: cleanup legacy Win9X checks
+"   2024 Oct 27 by Vim Project: cleanup gx mapping
+"   2024 Oct 28 by Vim Project: further improvements
+"   2024 Oct 31 by Vim Project: use autoloaded functions
+" Former Maintainer:   Charles E Campbell
 " GetLatestVimScripts: 1075 1 :AutoInstall: netrw.vim
 " Copyright:    Copyright (C) 1999-2021 Charles E. Campbell {{{1
 "               Permission is hereby granted to use and distribute this code,
@@ -20,7 +26,7 @@
 if &cp || exists("g:loaded_netrwPlugin")
  finish
 endif
-let g:loaded_netrwPlugin = "v171"
+let g:loaded_netrwPlugin = "v173"
 let s:keepcpo = &cpo
 set cpo&vim
 "DechoRemOn
@@ -28,13 +34,17 @@ set cpo&vim
 " ---------------------------------------------------------------------
 " Public Interface: {{{1
 
+" Commands Launch/URL {{{2
+command -complete=shellcmd -nargs=1   Launch  call netrw#Launch(trim(<q-args>))
+command -complete=file     -nargs=1   Open    call netrw#Open(trim(<q-args>))
+" " }}}
 " Local Browsing Autocmds: {{{2
 augroup FileExplorer
  au!
  au BufLeave *  if &ft != "netrw"|let w:netrw_prvfile= expand("%:p")|endif
  au BufEnter *	sil call s:LocalBrowse(expand("<amatch>"))
  au VimEnter *	sil call s:VimEnter(expand("<amatch>"))
- if has("win32") || has("win95") || has("win64") || has("win16")
+ if has("win32")
   au BufEnter .* sil call s:LocalBrowse(expand("<amatch>"))
  endif
 augroup END

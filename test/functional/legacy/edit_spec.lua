@@ -1,25 +1,95 @@
--- Test for edit functions
--- See also: src/nvim/testdir/test_edit.vim
+local n = require('test.functional.testnvim')()
+local Screen = require('test.functional.ui.screen')
 
-local helpers = require('test.functional.helpers')(after_each)
-local source = helpers.source
-local eq, eval = helpers.eq, helpers.eval
-local funcs = helpers.funcs
-local clear = helpers.clear
+local clear = n.clear
+local command = n.command
+local expect = n.expect
+local feed = n.feed
+local sleep = vim.uv.sleep
+
+before_each(clear)
 
 describe('edit', function()
-  before_each(clear)
-
-  it('reset insertmode from i_ctrl-r_=', function()
-    source([=[
-      call setline(1, ['abc'])
-      call cursor(1, 4)
-      call feedkeys(":set im\<cr>ZZZ\<c-r>=setbufvar(1,'&im', 0)\<cr>",'tnix')
-    ]=])
-    eq({'abZZZc'}, funcs.getline(1,'$'))
-    eq({0, 1, 1, 0}, funcs.getpos('.'))
-    eq(0, eval('&im'))
+  -- oldtest: Test_autoindent_remove_indent()
+  it('autoindent removes indent when Insert mode is stopped', function()
+    command('set autoindent')
+    -- leaving insert mode in a new line with indent added by autoindent, should
+    -- remove the indent.
+    feed('i<Tab>foo<CR><Esc>')
+    -- Need to delay for sometime, otherwise the code in getchar.c will not be
+    -- exercised.
+    sleep(50)
+    -- when a line is wrapped and the cursor is at the start of the second line,
+    -- leaving insert mode, should move the cursor back to the first line.
+    feed('o' .. ('x'):rep(20) .. '<Esc>')
+    -- Need to delay for sometime, otherwise the code in getchar.c will not be
+    -- exercised.
+    sleep(50)
+    expect('\tfoo\n\n' .. ('x'):rep(20))
   end)
 
-end)
+  -- oldtest: Test_edit_insert_reg()
+  it('inserting a register using CTRL-R', function()
+    local screen = Screen.new(10, 6)
+    feed('a<C-R>')
+    screen:expect([[
+      {18:^"}           |
+      {1:~           }|*4
+      {5:-- INSERT --}|
+    ]])
+    feed('=')
+    screen:expect([[
+      {18:"}           |
+      {1:~           }|*4
+      =^           |
+    ]])
+    feed([['r'<CR><Esc>]])
+    expect('r')
+    -- Test for inserting null and empty list
+    feed('a<C-R>=v:_null_list<CR><Esc>')
+    feed('a<C-R>=[]<CR><Esc>')
+    expect('r')
+  end)
 
+  -- oldtest: Test_edit_ctrl_r_failed()
+  it('positioning cursor after CTRL-R expression failed', function()
+    local screen = Screen.new(60, 6)
+
+    feed('i<C-R>')
+    screen:expect([[
+      {18:^"}                                                           |
+      {1:~                                                           }|*4
+      {5:-- INSERT --}                                                |
+    ]])
+    feed('=0z')
+    screen:expect([[
+      {18:"}                                                           |
+      {1:~                                                           }|*4
+      ={26:0}{9:z}^                                                         |
+    ]])
+    -- trying to insert a blob produces an error
+    feed('<CR>')
+    screen:expect([[
+      {18:"}                                                           |
+      {1:~                                                           }|
+      {3:                                                            }|
+      ={26:0}{9:z}                                                         |
+      {9:E976: Using a Blob as a String}                              |
+      {6:Press ENTER or type command to continue}^                     |
+    ]])
+
+    feed(':')
+    screen:expect([[
+      :^                                                           |
+      {1:~                                                           }|*4
+      {5:-- INSERT --}                                                |
+    ]])
+    -- ending Insert mode should put the cursor back on the ':'
+    feed('<Esc>')
+    screen:expect([[
+      ^:                                                           |
+      {1:~                                                           }|*4
+                                                                  |
+    ]])
+  end)
+end)
